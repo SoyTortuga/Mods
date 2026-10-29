@@ -126,15 +126,16 @@ namespace MoonSweepersTwitch.Game
         }
 
         /// <summary>
-        /// Refill a random already-cleared hex sector with dust (EXPERIMENTAL fallback).
+        /// Re-dust the moon by calling the game's own <c>MoonWorld.DevResetDust()</c>.
         ///
-        /// The game has no additive dust API and a negative cleaning dose is clamped, so
-        /// this writes the dust data directly: it finds the chunk under the sector's
-        /// centre (<see cref="MoonWorld.ChunkAt"/>), refills that chunk's coarse per-cell
-        /// "remaining" buffer to full, re-uploads the texture/mesh/collision, and resets
-        /// the region's aggregate remaining. Caveats: it re-dusts a whole chunk (roughly
-        /// the sector, maybe a touch more, since region→cell mapping isn't exposed), it's
-        /// host-local (not networked to crew), and it may not survive a save/reload.
+        /// The experimental per-sector approach (writing a chunk's coarse "remaining"
+        /// buffer directly) did not stick in a live save — the authoritative dust lives
+        /// in the game's dust-bank / clean-mask truth, and the coarse buffer gets
+        /// overwritten from it on the next refresh. <c>DevResetDust()</c> goes through
+        /// that authoritative path, so it actually re-dusts. The catch: it is the game's
+        /// own dev reset and re-dusts the WHOLE moon (undoing all cleaning progress),
+        /// not a single sector — the game exposes no reliable per-sector re-dust.
+        /// Host-local; not networked to crew.
         /// </summary>
         public static void RefillRandomSector(EffectContext ctx)
         {
@@ -145,79 +146,15 @@ namespace MoonSweepersTwitch.Game
                 return;
             }
 
-            var regions = world.Regions;
-            int count = (regions != null) ? regions.Count : 0;
-            if (regions == null || count <= 0)
-            {
-                Plugin.Log.LogWarning("[GameBridge] RefillSector: no regions available.");
-                return;
-            }
+            bool ok = world.DevResetDust();
 
-            // A sector is "cleared" when its remaining dust is ~0.
-            var cleared = new List<int>();
-            var remaining = world.regionRemaining;
-            if (remaining != null && remaining.Length >= count)
-            {
-                for (int i = 0; i < count; i++)
-                    if (remaining[i] <= 0.01f) cleared.Add(i);
-            }
-            else
-            {
-                // Fall back to sampling the surface at each region centre.
-                for (int i = 0; i < count; i++)
-                    if (world.RemainingAt(regions.Centers[i].normalized) <= 0.01f) cleared.Add(i);
-            }
-
-            if (cleared.Count == 0)
-            {
-                Plugin.Log.LogInfo("[GameBridge] RefillSector: no cleared sectors to refill.");
-                OnScreenMessages.Show("✨ Nothing's clean enough to re-dust!", 5f);
-                return;
-            }
-
-            int id = cleared[_rng.Next(cleared.Count)];
-            Vector3 dir = regions.Centers[id].normalized;
-            float before = world.RemainingAt(dir);
-
-            // No additive dust API exists, so write the dust data directly: find the
-            // chunk at the sector centre, set its coarse per-cell "remaining" back to
-            // full, then re-upload the texture / mesh / collision. Then nudge the
-            // region's aggregate so progress + UI follow. Host-local; not networked, and
-            // may not survive a save/reload — this is the experimental fallback.
-            var chunk = world.ChunkAt(dir, out Vector2 _local);
-            int cells = 0;
-            if (chunk != null)
-            {
-                var coarse = chunk.coarseRemaining;
-                if (coarse != null)
-                {
-                    for (int k = 0; k < coarse.Length; k++) coarse[k] = byte.MaxValue; // full dust
-                    cells = coarse.Length;
-                }
-                world.UploadCleaning(chunk);
-                world.RefreshCleanedMesh(chunk, true, new Rect(0f, 0f, 1f, 1f));
-                world.QueueCleaningCollision(chunk);
-                world.UpdateCleaningCollisions();
-            }
-
-            // Make the region read as un-cleaned again.
-            if (remaining != null && remaining.Length > id)
-            {
-                float init = world.RegionInitialDust(id);
-                remaining[id] = (init > 0f) ? init : 1f;
-            }
-            world.MarkRegionTouched(id);
-            world.QueueRegionCheck(id);
-
-            float after = world.RemainingAt(dir);
             Plugin.Log.LogInfo(
-                $"[GameBridge] RefillSector region {id}: chunk={(chunk != null)}, coarseCells={cells}, " +
-                $"remaining {before:0.###} -> {after:0.###}. ({ctx.Describe()})");
+                $"[GameBridge] DevResetDust -> {ok} (re-dusted the whole moon). ({ctx.Describe()})");
 
-            if (chunk != null && cells > 0)
-                OnScreenMessages.Show($"🌑 Sector {id} re-dusted!", 5f);
+            if (ok)
+                OnScreenMessages.Show("🌑 The whole moon is dusty again!", 5f);
             else
-                OnScreenMessages.Show($"⚠ Sector {id}: couldn't reach the dust data.", 6f);
+                OnScreenMessages.Show("⚠ Couldn't re-dust the moon.", 6f);
         }
 
         /// <summary>
