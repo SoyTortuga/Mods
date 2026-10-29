@@ -128,7 +128,93 @@ namespace MoonSweepersTwitch.Game
         }
 
         /// <summary>
-        /// Live-mask re-dust probe: paint dust back into a small circle around the player.
+        /// Read-only sector-state probe (writes nothing).
+        ///
+        /// The paint probe showed that a fully cleared sector isn't held in the cleaning
+        /// mask at all: the mask under the player read untouched (255) while the world
+        /// reported 0 dust remaining. Completed sectors are tracked per region instead
+        /// (<c>regionStates</c>, <c>regionRemaining</c>, <c>regionInitial</c>,
+        /// <c>regionTouched</c>, <c>CompletedRegionCount</c>) and drawn from that state.
+        /// Before flipping a sector back to "in progress", this logs the sectors nearest
+        /// the player and a tally of every state value, cross-checked against
+        /// <c>IsRegionComplete</c> and <c>CompletedRegionCount</c>, so we learn which byte
+        /// means "complete".
+        /// </summary>
+        public static void RefillRandomSector(EffectContext ctx)
+        {
+            var inv = FindFirst<MoonDustInventory>();
+            var world = inv?.World ?? FindFirst<MoonWorld>();
+            var walker = inv?.walker;
+            if (world == null || walker == null)
+            {
+                Plugin.Log.LogInfo($"[GameBridge] SectorProbe: no world/walker (not in-game?). ({ctx.Describe()})");
+                return;
+            }
+
+            var regions = world.Regions;
+            int count = regions != null ? regions.Count : 0;
+            var states = world.regionStates;
+            var remaining = world.regionRemaining;
+            var initial = world.regionInitial;
+            var touched = world.regionTouched;
+            Plugin.Log.LogInfo(
+                $"[GameBridge] SectorProbe: regions={count} states={states?.Length ?? -1} " +
+                $"remaining={remaining?.Length ?? -1} initial={initial?.Length ?? -1} touched={touched?.Length ?? -1} " +
+                $"CompletedRegionCount={world.CompletedRegionCount} TouchedRegionCount={world.TouchedRegionCount}");
+            if (count <= 0 || states == null) return;
+
+            // The three sector centres closest to the player (the player may be near a border).
+            Vector3 dir = walker.transform.position.normalized;
+            var best = new List<(float dot, int id)>();
+            for (int i = 0; i < count; i++)
+            {
+                float d = Vector3.Dot(regions.Centers[i].normalized, dir);
+                best.Add((d, i));
+            }
+            best.Sort((a, b) => b.dot.CompareTo(a.dot));
+            for (int k = 0; k < Math.Min(3, best.Count); k++)
+            {
+                int id = best[k].id;
+                Plugin.Log.LogInfo(
+                    $"[GameBridge] SectorProbe: #{k + 1} region {id} dot={best[k].dot:0.######} " +
+                    $"state={At(states, id)} remaining={At(remaining, id)} initial={At(initial, id)} " +
+                    $"touched={At(touched, id)} IsRegionComplete={SafeBool(() => world.IsRegionComplete(id))} " +
+                    $"RegionRemainingDust={SafeFloat(() => world.RegionRemainingDust(id))}");
+            }
+
+            // Tally every state value and how many of each the game calls complete.
+            var total = new int[256];
+            var complete = new int[256];
+            int n = Math.Min(count, states.Length);
+            for (int i = 0; i < n; i++)
+            {
+                byte s = states[i];
+                total[s]++;
+                if (SafeBool(() => world.IsRegionComplete(i)) == "True") complete[s]++;
+            }
+            var tally = new System.Text.StringBuilder();
+            for (int s = 0; s < 256; s++)
+                if (total[s] > 0) tally.Append($"state {s}: {total[s]} ({complete[s]} complete); ");
+            Plugin.Log.LogInfo($"[GameBridge] SectorProbe: {tally} ({ctx.Describe()})");
+        }
+
+        private static string At<T>(Il2CppArrayBase<T>? arr, int i) =>
+            arr != null && i >= 0 && i < arr.Length ? arr[i]!.ToString()! : "n/a";
+
+        private static string SafeBool(Func<bool> f)
+        {
+            try { return f().ToString(); } catch (Exception ex) { return "threw: " + ex.Message; }
+        }
+
+        private static string SafeFloat(Func<float> f)
+        {
+            try { return f().ToString("0.###"); } catch (Exception ex) { return "threw: " + ex.Message; }
+        }
+
+        /// <summary>
+        /// Paint dust back into a small circle around the player (not wired to an effect).
+        /// Kept for partially cleaned, not-yet-complete sectors, where the cleaning still
+        /// lives in the mask.
         ///
         /// Each loaded chunk holds its authoritative cleaning in <c>chunk.cleaning</c>
         /// (a <see cref="MoonCleanMask"/>). Removing pages outright worked but left the
@@ -144,7 +230,7 @@ namespace MoonSweepersTwitch.Game
         /// and the refresh chain stops at the first failing step, so collision is never
         /// rebuilt from a half-built mesh.
         /// </summary>
-        public static void RefillRandomSector(EffectContext ctx)
+        private static void PaintDustAroundPlayer(EffectContext ctx)
         {
             var inv = FindFirst<MoonDustInventory>();
             var world = inv?.World ?? FindFirst<MoonWorld>();
