@@ -46,11 +46,6 @@ namespace MoonSweepersTwitch.Game
 
         private static readonly System.Random _rng = new System.Random();
 
-        // Capture-replay state for the dust-page re-dust experiment: a valid "full dust"
-        // page captured from an uncleaned chunk, to be replayed onto a cleared one.
-        private static List<(int page, byte[] bytes)>? _dustTemplate;
-        private static int _dustTemplateChunk = -1;
-
         /// <summary>True while the vehicle-breakdown window is active.</summary>
         public static bool VehiclesBroken => Time.realtimeSinceStartup < _vehiclesBrokenUntil;
 
@@ -133,19 +128,18 @@ namespace MoonSweepersTwitch.Game
         }
 
         /// <summary>
-        /// STEP 3 of the dust-page re-dust route: capture-and-replay (the decisive test).
+        /// Live-mask re-dust probe: clear the cleaning mask of the chunk the player is on.
         ///
-        /// A dust page is a serialized stream, not a bitmask — applying a zeroed page
-        /// threw "Corrupted data ReadInternal", so a full-dust page can't be synthesized.
-        /// The only remaining route is to capture a REAL, valid page from an uncleaned
-        /// (dusty) chunk and replay it onto a cleared chunk. This is a two-press probe on
-        /// one hotkey:
-        ///   1st press, standing on DUSTY ground  -> captures that chunk's page(s).
-        ///   2nd press, standing on CLEARED ground -> applies the captured page(s) here
-        ///                                            and logs remaining-dust before/after.
-        /// If the cleared ground re-dusts, the route works and we generalise it to a
-        /// random sector. If apply throws "Corrupted data", the page index/payload is
-        /// chunk-specific and cross-chunk replay is a dead end. Nothing is saved to disk.
+        /// Each loaded chunk holds its authoritative cleaning in <c>chunk.cleaning</c>
+        /// (a <see cref="MoonCleanMask"/>). The mask stores only cleaned pages — a missing
+        /// page means untouched, full dust (which is why untouched chunks save no data).
+        /// So removing every page and re-uploading should put the dust back. The player's
+        /// own chunk is used because it is guaranteed to be loaded (the earlier crash
+        /// came from an unloaded chunk). Each refresh step is guarded and logged
+        /// separately, and the dust reading is sampled before/after both through the
+        /// world (<c>RemainingAt</c>) and straight from the mask (<c>Sample</c>).
+        /// This re-dusts the WHOLE chunk under the player, not one sector — narrowing it
+        /// to a sector comes after the basic mechanism is proven.
         /// </summary>
         public static void RefillRandomSector(EffectContext ctx)
         {
@@ -173,67 +167,80 @@ namespace MoonSweepersTwitch.Game
             }
 
             int chunkId = world.ChunkId(chunk);
-            float here = world.RemainingAt(dir);
-
-            // Collect this chunk's non-empty pages (copied to managed byte[] for storage).
-            var pages = new List<(int page, byte[] bytes)>();
-            for (int page = 0; page < 256; page++)
+            var mask = chunk.cleaning;
+            if (mask == null)
             {
-                Il2CppStructArray<byte> packed;
-                bool ok;
-                try { ok = world.WriteCrewDustPage(chunkId, page, out packed); }
-                catch (Exception ex)
-                {
-                    Plugin.Log.LogWarning($"[GameBridge] Refill: WriteCrewDustPage(page {page}) threw: {ex.Message}");
-                    break;
-                }
-                if (!ok || packed == null || packed.Length == 0) continue;
-
-                var managed = new byte[packed.Length];
-                for (int b = 0; b < packed.Length; b++) managed[b] = packed[b];
-                pages.Add((page, managed));
-            }
-
-            if (_dustTemplate == null)
-            {
-                // Capture phase: we need a dusty chunk to grab a valid "full dust" page.
-                if (here <= 0.01f || pages.Count == 0)
-                {
-                    Plugin.Log.LogInfo(
-                        $"[GameBridge] Refill(capture): stand on DUSTY, uncleaned ground first " +
-                        $"(chunk {chunkId}, remaining={here:0.###}, pages={pages.Count}).");
-                    return;
-                }
-                _dustTemplate = pages;
-                _dustTemplateChunk = chunkId;
-                Plugin.Log.LogInfo(
-                    $"[GameBridge] Refill(capture): stored {pages.Count} page(s) from dusty chunk " +
-                    $"{chunkId} (remaining={here:0.###}). Now go to CLEARED ground and press again.");
+                Plugin.Log.LogWarning($"[GameBridge] Refill: chunk {chunkId} has no cleaning mask (not loaded?).");
                 return;
             }
 
-            // Replay phase: apply the captured dusty page(s) onto THIS chunk.
-            float before = here;
-            int applied = 0;
-            foreach (var (page, bytes) in _dustTemplate)
+            float worldBefore = world.RemainingAt(dir);
+            float maskBefore = SafeSample(mask, _local);
+
+            // Copy the keys out first: the interop List has no indexer, and we're about
+            // to remove the very pages it lists.
+            var keyList = new Il2CppSystem.Collections.Generic.List<int>();
+            mask.PageKeys(keyList);
+            var keyArr = keyList.ToArray();
+            int pageCount = keyArr.Length;
+            var keys = new int[pageCount];
+            for (int i = 0; i < pageCount; i++) keys[i] = keyArr[i];
+
+            var keyText = new System.Text.StringBuilder();
+            for (int i = 0; i < pageCount && i < 32; i++) keyText.Append(keys[i]).Append(' ');
+            Plugin.Log.LogInfo(
+                $"[GameBridge] Refill: chunk {chunkId} local=({_local.x:0.###},{_local.y:0.###}), " +
+                $"{pageCount} cleaned page(s): {keyText}");
+
+            // Removing a page = that patch becomes untouched = full dust.
+            int removed = 0;
+            for (int i = 0; i < pageCount; i++)
             {
-                try
-                {
-                    world.ApplyCrewDustPage(chunkId, page, new Il2CppStructArray<byte>(bytes));
-                    applied++;
-                }
+                try { mask.RemovePage(keys[i]); removed++; }
                 catch (Exception ex)
                 {
-                    Plugin.Log.LogError($"[GameBridge] Refill(replay): ApplyCrewDustPage(page {page}) threw: {ex.Message}");
+                    Plugin.Log.LogError($"[GameBridge] Refill: RemovePage({keys[i]}) threw: {ex.Message}");
+                    break;
                 }
             }
-            float after = world.RemainingAt(dir);
-            Plugin.Log.LogInfo(
-                $"[GameBridge] Refill(replay): applied {applied}/{_dustTemplate.Count} page(s) from chunk " +
-                $"{_dustTemplateChunk} onto chunk {chunkId}, remaining {before:0.###} -> {after:0.###}. ({ctx.Describe()})");
 
-            _dustTemplate = null; // reset so the next press captures afresh
-            _dustTemplateChunk = -1;
+            // Push the change through the same refresh chain cleaning uses. Each step is
+            // guarded on its own so one failure doesn't hide whether the others worked.
+            Step("mask.Upload", () => mask.Upload());
+            Step("UploadCleaning", () => world.UploadCleaning(chunk));
+            Step("RefreshCleanedMesh", () => world.RefreshCleanedMesh(chunk, true, new Rect(0f, 0f, 1f, 1f)));
+            Step("QueueCleaningCollision", () => world.QueueCleaningCollision(chunk));
+            Step("UpdateCleaningCollisions", () => world.UpdateCleaningCollisions());
+
+            float worldAfter = world.RemainingAt(dir);
+            float maskAfter = SafeSample(mask, _local);
+            Plugin.Log.LogInfo(
+                $"[GameBridge] Refill: chunk {chunkId}, removed {removed}/{pageCount} page(s), " +
+                $"RemainingAt {worldBefore:0.###} -> {worldAfter:0.###}, " +
+                $"mask.Sample {maskBefore:0.###} -> {maskAfter:0.###}. ({ctx.Describe()})");
+        }
+
+        private static float SafeSample(MoonCleanMask mask, Vector2 uv)
+        {
+            try { return mask.Sample(uv.x, uv.y); }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning("[GameBridge] Refill: mask.Sample threw: " + ex.Message);
+                return float.NaN;
+            }
+        }
+
+        private static void Step(string label, Action action)
+        {
+            try
+            {
+                action();
+                Plugin.Log.LogInfo($"[GameBridge] Refill: {label} ok.");
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogError($"[GameBridge] Refill: {label} threw: {ex.Message}");
+            }
         }
 
         /// <summary>
