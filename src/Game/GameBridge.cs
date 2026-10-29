@@ -381,8 +381,18 @@ namespace MoonSweepersTwitch.Game
             d.Remaining[id] = full;
             d.Initial[id] = full;
             d.Touched[id] = false;
+            // regionGpu is per-sector shader data. Keep this sector's own x/y/z (z differs per
+            // sector; copying a neighbour's made the hex merge into it on screen) and only set
+            // w, which reads 0 for a cleared sector and -1 for an untouched one.
             var gpu = d.Gpu;
-            if (gpu != null && refId >= 0 && refId < gpu.Length && id < gpu.Length) gpu[id] = gpu[refId];
+            string gpuChange = "n/a";
+            if (gpu != null && id < gpu.Length)
+            {
+                Vector4 old = gpu[id];
+                float w = refId >= 0 && refId < gpu.Length ? gpu[refId].w : -1f;
+                gpu[id] = new Vector4(old.x, old.y, old.z, w);
+                gpuChange = $"{old} -> {gpu[id]}";
+            }
             try { world.CompletedRegionCount = Math.Max(0, world.CompletedRegionCount - 1); }
             catch (Exception ex) { Plugin.Log.LogWarning("[GameBridge] Uncomplete: setting CompletedRegionCount threw: " + ex.Message); }
 
@@ -390,7 +400,8 @@ namespace MoonSweepersTwitch.Game
             Plugin.Log.LogInfo(
                 $"[GameBridge] Uncomplete: region {id} -> state={d.States[id]} remaining={d.Remaining[id]:0.###} " +
                 $"complete={SafeBool(() => world.IsRegionComplete(id))} " +
-                $"CompletedRegionCount={world.CompletedRegionCount} (ref {refId}, UpdateProgress {(ok ? "ok" : "failed")}).");
+                $"gpu {gpuChange} CompletedRegionCount={world.CompletedRegionCount} " +
+                $"(ref {refId}, UpdateProgress {(ok ? "ok" : "failed")}).");
             return true;
         }
 
