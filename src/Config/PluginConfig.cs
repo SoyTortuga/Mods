@@ -1,4 +1,5 @@
 using BepInEx.Configuration;
+using MoonSweepersTwitch.Game;
 using UnityEngine;
 
 namespace MoonSweepersTwitch.Config

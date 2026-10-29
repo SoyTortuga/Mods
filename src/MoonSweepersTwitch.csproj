@@ -4,7 +4,7 @@
     Moon Sweepers Twitch Integration — BepInEx 6 (IL2CPP) plugin.
 
     BUILD PREREQUISITES
-    -------------------
+    ===================
     1. Install BepInEx 6 (IL2CPP, win-x64, bleeding-edge build 6.0.0-be.791 or
        close) into the Moon Sweepers game folder, plus the "MoonSweepers BepInEx
        Patcher".
@@ -74,6 +74,10 @@
     </Reference>
     <Reference Include="UnityEngine.InputLegacyModule">
       <HintPath>$(GameInteropDir)\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(GameInteropDir)\UnityEngine.TextRenderingModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <!--

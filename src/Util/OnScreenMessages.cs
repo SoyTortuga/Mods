@@ -50,7 +50,8 @@ namespace MoonSweepersTwitch.Util
                 alignment = TextAnchor.MiddleLeft,
                 wordWrap = true,
                 normal = { textColor = Color.white },
-                padding = new RectOffset(10, 10, 6, 6),
+                // IL2CPP interop doesn't expose RectOffset's 4-arg ctor; set the fields instead.
+                padding = new RectOffset { left = 10, right = 10, top = 6, bottom = 6 },
             };
 
             lock (Gate)
