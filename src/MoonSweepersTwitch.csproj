@@ -1,0 +1,105 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Moon Sweepers Twitch Integration — BepInEx 6 (IL2CPP) plugin.
+
+    BUILD PREREQUISITES
+    -------------------
+    1. Install BepInEx 6 (IL2CPP, win-x64, bleeding-edge build 6.0.0-be.791 or
+       close) into the Moon Sweepers game folder, plus the "MoonSweepers BepInEx
+       Patcher".
+    2. Run the game ONCE so BepInEx generates the interop assemblies into
+       <GameDir>\BepInEx\interop\ (Assembly-CSharp.dll, UnityEngine.*.dll, ...).
+    3. Tell this project where the game lives, either by:
+         dotnet build src/MoonSweepersTwitch.csproj -c Release -p:GameDir="C:\Program Files (x86)\Steam\steamapps\common\Moon Sweepers"
+       or by creating a file  Directory.Build.props.user  next to the .sln/.csproj:
+         <Project><PropertyGroup>
+           <GameDir>C:\...\Moon Sweepers</GameDir>
+         </PropertyGroup></Project>
+
+    If GameDir points at a valid install, the built DLL is copied to
+    <GameDir>\BepInEx\plugins\MoonSweepersTwitch\ automatically.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>MoonSweepersTwitch</AssemblyName>
+    <RootNamespace>MoonSweepersTwitch</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <!-- Only our own DLL should land in plugins; BepInEx/Unity DLLs are provided at runtime. -->
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <DebugType>portable</DebugType>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <!-- Pull in your local game path if you created the optional override file. -->
+  <Import Project="$(MSBuildThisFileDirectory)..\Directory.Build.props.user"
+          Condition="Exists('$(MSBuildThisFileDirectory)..\Directory.Build.props.user')" />
+
+  <PropertyGroup>
+    <!-- Where BepInEx wrote the IL2CPP interop assemblies after first launch. -->
+    <GameInteropDir Condition="'$(GameInteropDir)' == '' and '$(GameDir)' != ''">$(GameDir)\BepInEx\interop</GameInteropDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      BepInEx 6 IL2CPP core. Pin this to the SAME build you installed into the
+      game (check <GameDir>\BepInEx\core). Available versions:
+      https://nuget.bepinex.dev  (feed configured in ../nuget.config)
+    -->
+    <PackageReference Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.791" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!--
+    Game + Unity interop assemblies. These are generated per-machine by BepInEx,
+    so they are referenced from the local game folder rather than committed.
+    They are present at runtime, so Private=false (do not copy to output).
+  -->
+  <ItemGroup Condition="'$(GameInteropDir)' != ''">
+    <Reference Include="Il2Cppmscorlib">
+      <HintPath>$(GameInteropDir)\Il2Cppmscorlib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(GameInteropDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(GameInteropDir)\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(GameInteropDir)\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!--
+      The game's own code. Uncomment once you start wiring real effects against
+      it (see src/Game/GamePatches.cs). Not required to compile the Twitch pipeline.
+    -->
+    <!--
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(GameInteropDir)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    -->
+  </ItemGroup>
+
+  <!-- Fail early with a readable message instead of a wall of "type not found". -->
+  <Target Name="CheckGameDir" BeforeTargets="BeforeCompile"
+          Condition="'$(GameInteropDir)' == '' or !Exists('$(GameInteropDir)')">
+    <Error Text="GameInteropDir not found. Set GameDir to your Moon Sweepers install (see the header comment in MoonSweepersTwitch.csproj) and launch the game once with BepInEx so the interop assemblies are generated." />
+  </Target>
+
+  <!-- Deploy the built plugin straight into the game. -->
+  <Target Name="DeployToGame" AfterTargets="Build" Condition="'$(GameDir)' != '' and Exists('$(GameDir)')">
+    <MakeDir Directories="$(GameDir)\BepInEx\plugins\$(AssemblyName)" />
+    <Copy SourceFiles="$(TargetPath)"
+          DestinationFolder="$(GameDir)\BepInEx\plugins\$(AssemblyName)" />
+    <Message Importance="high" Text="Deployed $(AssemblyName).dll -> $(GameDir)\BepInEx\plugins\$(AssemblyName)" />
+  </Target>
+
+</Project>

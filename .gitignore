@@ -1,0 +1,21 @@
+# Build output
+bin/
+obj/
+*.user
+
+# Local, machine-specific build settings (contains your game path)
+Directory.Build.props.user
+GameDir.props
+
+# Local secrets / tokens that may get copied here during testing
+*.tokens.json
+secrets.*
+
+# IDE
+.vs/
+.idea/
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
