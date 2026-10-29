@@ -76,6 +76,53 @@ namespace MoonSweepersTwitch.Game
         }
 
         /// <summary>
+        /// Force the local player to drop all the moon dust they're holding: each 1 kg
+        /// is packed into a canister and dropped on the ground via the game's own
+        /// mechanic (so it creates real, networked <c>MoonDroppedCanister</c>s). Holding
+        /// 5 kg drops 5 canisters they have to go re-collect. One-shot (not timed).
+        /// </summary>
+        public static void DropDustCanisters(EffectContext ctx)
+        {
+            var inv = Object.FindObjectOfType<MoonDustInventory>();
+            if (inv == null)
+            {
+                Plugin.Log.LogInfo($"[GameBridge] DropDustCanisters: no dust inventory (not in-game?). ({ctx.Describe()})");
+                return;
+            }
+
+            var world = inv.World;
+            var walker = inv.walker;
+            string player = inv.playerId;
+            if (world == null || walker == null || string.IsNullOrEmpty(player))
+            {
+                Plugin.Log.LogWarning("[GameBridge] DropDustCanisters: world/walker/playerId unavailable.");
+                return;
+            }
+
+            var t = walker.transform;
+            Vector3 point = t.position;
+            Vector3 up = t.up;
+
+            int dropped = 0;
+            int guard = 0;
+            double last = inv.Kilograms;
+            // Pack one canister (<=1 kg) per call until the player's dust is gone.
+            // The decrease check guards against a pack call that can't make progress.
+            while (inv.Kilograms > 0.0001 && guard++ < 200)
+            {
+                if (!world.PackDustCanister(player, point, up, out int _))
+                    break;
+                dropped++;
+
+                double now = inv.Kilograms;
+                if (now >= last - 1e-6) break; // no progress -> stop (avoid runaway)
+                last = now;
+            }
+
+            Plugin.Log.LogInfo($"[GameBridge] Dropped {dropped} dust canister(s) ({ctx.Describe()}).");
+        }
+
+        /// <summary>
         /// Called every frame on the main thread. Enforces whichever timed effects are
         /// active and announces when each one ends. Never throws into the game loop.
         /// </summary>
