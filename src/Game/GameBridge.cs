@@ -126,15 +126,15 @@ namespace MoonSweepersTwitch.Game
         }
 
         /// <summary>
-        /// Refill a random already-cleared hex sector with dust.
+        /// Refill a random already-cleared hex sector with dust (EXPERIMENTAL fallback).
         ///
-        /// EXPERIMENTAL: the game has no additive dust API — cleaning is one-directional
-        /// (<c>CleanAt</c> reduces a per-direction "remaining" value, 0 = cleared). The
-        /// bet here is that cleaning does <c>remaining -= dose</c> (clamped), so a
-        /// NEGATIVE dose adds dust back and rides the same networked path as real
-        /// cleaning. We log remaining-before/after so a live test shows whether it took;
-        /// if negative dose is clamped away, this is a no-op and we fall back to writing
-        /// the dust data directly.
+        /// The game has no additive dust API and a negative cleaning dose is clamped, so
+        /// this writes the dust data directly: it finds the chunk under the sector's
+        /// centre (<see cref="MoonWorld.ChunkAt"/>), refills that chunk's coarse per-cell
+        /// "remaining" buffer to full, re-uploads the texture/mesh/collision, and resets
+        /// the region's aggregate remaining. Caveats: it re-dusts a whole chunk (roughly
+        /// the sector, maybe a touch more, since region→cell mapping isn't exposed), it's
+        /// host-local (not networked to crew), and it may not survive a save/reload.
         /// </summary>
         public static void RefillRandomSector(EffectContext ctx)
         {
@@ -177,41 +177,47 @@ namespace MoonSweepersTwitch.Game
 
             int id = cleared[_rng.Next(cleared.Count)];
             Vector3 dir = regions.Centers[id].normalized;
-
-            // Calibrate the moon radius from the local player's distance to the centre,
-            // so we don't need the game's private radius field.
-            Vector3 center = world.transform.position;
-            var walker = Object.FindObjectOfType<MoonWalker>();
-            float radius = (walker != null) ? (walker.transform.position - center).magnitude : 0f;
-            if (radius <= 0.01f) radius = 100f; // only the direction matters for sampling
-
-            Vector3 point = center + dir * radius;
-            float width = regions.ActualDiameter;
-            if (width <= 0f) width = radius * 0.1f;
-
             float before = world.RemainingAt(dir);
-            int changed = world.CleanAt(point, width, -1f); // negative dose = add dust (hypothesis)
 
-            // Cover the hex more fully by also dosing each corner.
-            var corners = regions.Corners(id);
-            if (corners != null)
+            // No additive dust API exists, so write the dust data directly: find the
+            // chunk at the sector centre, set its coarse per-cell "remaining" back to
+            // full, then re-upload the texture / mesh / collision. Then nudge the
+            // region's aggregate so progress + UI follow. Host-local; not networked, and
+            // may not survive a save/reload — this is the experimental fallback.
+            var chunk = world.ChunkAt(dir, out Vector2 _local);
+            int cells = 0;
+            if (chunk != null)
             {
-                for (int c = 0; c < corners.Length; c++)
+                var coarse = chunk.coarseRemaining;
+                if (coarse != null)
                 {
-                    Vector3 cp = center + corners[c].normalized * radius;
-                    changed += world.CleanAt(cp, width * 0.6f, -1f);
+                    for (int k = 0; k < coarse.Length; k++) coarse[k] = byte.MaxValue; // full dust
+                    cells = coarse.Length;
                 }
+                world.UploadCleaning(chunk);
+                world.RefreshCleanedMesh(chunk, true, new Rect(0f, 0f, 1f, 1f));
+                world.QueueCleaningCollision(chunk);
+                world.UpdateCleaningCollisions();
             }
+
+            // Make the region read as un-cleaned again.
+            if (remaining != null && remaining.Length > id)
+            {
+                float init = world.RegionInitialDust(id);
+                remaining[id] = (init > 0f) ? init : 1f;
+            }
+            world.MarkRegionTouched(id);
+            world.QueueRegionCheck(id);
 
             float after = world.RemainingAt(dir);
             Plugin.Log.LogInfo(
-                $"[GameBridge] RefillSector region {id}: remaining {before:0.###} -> {after:0.###}, " +
-                $"texels changed {changed}, width {width:0.##}. ({ctx.Describe()})");
+                $"[GameBridge] RefillSector region {id}: chunk={(chunk != null)}, coarseCells={cells}, " +
+                $"remaining {before:0.###} -> {after:0.###}. ({ctx.Describe()})");
 
-            if (after > before + 0.001f)
-                OnScreenMessages.Show($"🌋 Sector {id} re-dusted!", 5f);
+            if (chunk != null && cells > 0)
+                OnScreenMessages.Show($"🌑 Sector {id} re-dusted!", 5f);
             else
-                OnScreenMessages.Show($"⚠ Sector {id} refill had no effect (negative dose may be clamped).", 6f);
+                OnScreenMessages.Show($"⚠ Sector {id}: couldn't reach the dust data.", 6f);
         }
 
         /// <summary>
