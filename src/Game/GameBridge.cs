@@ -40,6 +40,12 @@ namespace MoonSweepersTwitch.Game
         private static MoonToolbelt? _toolbelt;
         private static int _brushSlot = -1;
 
+        // Tick runs every frame while an effect is active, so a missing component is
+        // retried at most every couple of seconds and a repeating error is logged once.
+        private static float _passengerRetryAt;
+        private static float _toolbeltRetryAt;
+        private static string? _lastTickError;
+
         // Latches so the "effect ended" feedback fires exactly once.
         private static bool _vehiclesWasBroken;
         private static bool _toothbrushWasActive;
@@ -348,7 +354,11 @@ namespace MoonSweepersTwitch.Game
             }
             catch (Exception ex)
             {
-                Plugin.Log.LogError("[GameBridge] Tick error: " + ex);
+                if (ex.Message != _lastTickError)
+                {
+                    _lastTickError = ex.Message;
+                    Plugin.Log.LogError("[GameBridge] Tick error (repeats of this message are suppressed): " + ex);
+                }
             }
         }
 
@@ -418,18 +428,22 @@ namespace MoonSweepersTwitch.Game
 
         private static MoonVehiclePassenger? Passenger()
         {
-            // MoonVehiclePassenger exists only on the local player, so FindObjectOfType
-            // returns the host's own passenger (remote crew use separate components).
-            if (_passenger == null)
+            // MoonVehiclePassenger exists only on the local player, so the first match is
+            // the host's own passenger (remote crew use separate components).
+            if (_passenger == null && Time.realtimeSinceStartup >= _passengerRetryAt)
+            {
                 _passenger = FindFirst<MoonVehiclePassenger>();
+                if (_passenger == null) _passengerRetryAt = Time.realtimeSinceStartup + 2f;
+            }
             return _passenger;
         }
 
         private static MoonToolbelt? Toolbelt()
         {
-            if (_toolbelt == null)
+            if (_toolbelt == null && Time.realtimeSinceStartup >= _toolbeltRetryAt)
             {
                 _toolbelt = FindFirst<MoonToolbelt>();
+                if (_toolbelt == null) _toolbeltRetryAt = Time.realtimeSinceStartup + 2f;
                 _brushSlot = -1; // new toolbelt -> re-resolve the brush slot
             }
             return _toolbelt;
