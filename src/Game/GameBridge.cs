@@ -128,7 +128,121 @@ namespace MoonSweepersTwitch.Game
         }
 
         /// <summary>
-        /// Read-only sector-state probe (writes nothing).
+        /// Re-dust the cleared sector the player is standing in by un-completing it.
+        ///
+        /// The sector-state probe decoded <c>regionStates</c>: 0 = normal, 1 = cleared by
+        /// the player (matches <c>CompletedRegionCount</c>), 2 = complete but never had dust.
+        /// When a sector completes, its cleaned pages are pruned from the chunk masks and
+        /// the clean look comes from its state alone, so the mask there is already full
+        /// dust. This flips state 1 back to 0, restores remaining/initial dust to a full
+        /// amount, clears touched, copies the per-sector GPU data from an untouched sector,
+        /// and drops <c>CompletedRegionCount</c> by one.
+        ///
+        /// Safety: only the sector under the player is changed, and only if it is state 1.
+        /// The refresh stops at the first failing step and never rebuilds collision, so the
+        /// player can't fall through. Logs before/after for comparison.
+        /// </summary>
+        public static void RefillRandomSector(EffectContext ctx)
+        {
+            var inv = FindFirst<MoonDustInventory>();
+            var world = inv?.World ?? FindFirst<MoonWorld>();
+            var walker = inv?.walker;
+            if (world == null || walker == null)
+            {
+                Plugin.Log.LogInfo($"[GameBridge] Uncomplete: no world/walker (not in-game?). ({ctx.Describe()})");
+                return;
+            }
+
+            var regions = world.Regions;
+            int count = regions != null ? regions.Count : 0;
+            var centers = regions?.Centers;
+            var states = world.regionStates;
+            var remaining = world.regionRemaining;
+            var initial = world.regionInitial;
+            var touched = world.regionTouched;
+            var gpu = world.regionGpu;
+            if (count <= 0 || centers == null || states == null || remaining == null || initial == null || touched == null)
+            {
+                Plugin.Log.LogWarning("[GameBridge] Uncomplete: region data unavailable.");
+                return;
+            }
+            int n = Math.Min(count, Math.Min(states.Length, Math.Min(remaining.Length, Math.Min(initial.Length, touched.Length))));
+
+            // Sort sectors by closeness to the player once; reused to find references.
+            Vector3 dir = walker.transform.position.normalized;
+            var byDot = new List<(float dot, int id)>(n);
+            for (int i = 0; i < n; i++) byDot.Add((Vector3.Dot(centers[i].normalized, dir), i));
+            byDot.Sort((a, b) => b.dot.CompareTo(a.dot));
+
+            int id = byDot[0].id;
+            if (states[id] != 1)
+            {
+                Plugin.Log.LogInfo(
+                    $"[GameBridge] Uncomplete: region {id} under you has state {states[id]}, not 1 (cleared by you). " +
+                    "Stand inside a sector you've fully cleared. No write.");
+                return;
+            }
+
+            // Reference: the nearest untouched normal sector (state 0, not touched).
+            int refId = -1;
+            foreach (var (_, i) in byDot)
+            {
+                if (states[i] == 0 && !touched[i]) { refId = i; break; }
+            }
+
+            // Full dust amount: the game's own initial value, else the reference's.
+            float full = TryFloat(() => world.RegionInitialDust(id));
+            if (full <= 0f && refId >= 0) full = TryFloat(() => world.RegionInitialDust(refId));
+            if (full <= 0f)
+            {
+                // Last resort: any touched sector with a known initial value.
+                foreach (var (_, i) in byDot)
+                    if (initial[i] > 0f) { full = initial[i]; break; }
+            }
+            if (full <= 0f)
+            {
+                Plugin.Log.LogWarning("[GameBridge] Uncomplete: couldn't find a full-dust amount. No write.");
+                return;
+            }
+
+            Plugin.Log.LogInfo(
+                $"[GameBridge] Uncomplete: BEFORE region {id} state={states[id]} remaining={remaining[id]} initial={initial[id]} " +
+                $"touched={touched[id]} gpu={At(gpu, id)} complete={SafeBool(() => world.IsRegionComplete(id))} " +
+                $"| ref {refId} state={At(states, refId)} touched={At(touched, refId)} initial={At(initial, refId)} gpu={At(gpu, refId)} " +
+                $"| full={full:0.###} CompletedRegionCount={world.CompletedRegionCount} RemainingAt={world.RemainingAt(dir):0.###}");
+
+            // Write: un-complete the sector.
+            states[id] = 0;
+            remaining[id] = full;
+            initial[id] = full;
+            touched[id] = false;
+            if (gpu != null && refId >= 0 && refId < gpu.Length && id < gpu.Length) gpu[id] = gpu[refId];
+            try { world.CompletedRegionCount = Math.Max(0, world.CompletedRegionCount - 1); }
+            catch (Exception ex) { Plugin.Log.LogWarning("[GameBridge] Uncomplete: setting CompletedRegionCount threw: " + ex.Message); }
+
+            // Refresh, stopping at the first failure. Collision is deliberately left alone.
+            var chunk = world.ChunkAt(dir, out Vector2 _local);
+            var mask = chunk?.cleaning;
+            bool ok = Step("UpdateProgress", () => world.UpdateProgress());
+            if (ok && mask != null) ok = Step("mask.Upload", () => mask.Upload());
+            if (ok && chunk != null) ok = Step("UploadCleaning", () => world.UploadCleaning(chunk));
+            if (ok && chunk != null) ok = Step("RefreshCleanedMesh", () => world.RefreshCleanedMesh(chunk, true, new Rect(0f, 0f, 1f, 1f)));
+
+            Plugin.Log.LogInfo(
+                $"[GameBridge] Uncomplete: AFTER region {id} state={states[id]} remaining={remaining[id]} " +
+                $"gpu={At(gpu, id)} complete={SafeBool(() => world.IsRegionComplete(id))} " +
+                $"RegionRemainingDust={SafeFloat(() => world.RegionRemainingDust(id))} " +
+                $"CompletedRegionCount={world.CompletedRegionCount} RemainingAt={world.RemainingAt(dir):0.###} " +
+                $"refresh {(ok ? "completed" : "STOPPED at failure")}. ({ctx.Describe()})");
+        }
+
+        private static float TryFloat(Func<float> f)
+        {
+            try { return f(); } catch { return -1f; }
+        }
+
+        /// <summary>
+        /// Read-only sector-state probe (writes nothing; kept for diagnostics).
         ///
         /// The paint probe showed that a fully cleared sector isn't held in the cleaning
         /// mask at all: the mask under the player read untouched (255) while the world
@@ -140,7 +254,7 @@ namespace MoonSweepersTwitch.Game
         /// <c>IsRegionComplete</c> and <c>CompletedRegionCount</c>, so we learn which byte
         /// means "complete".
         /// </summary>
-        public static void RefillRandomSector(EffectContext ctx)
+        private static void ProbeSectorStates(EffectContext ctx)
         {
             var inv = FindFirst<MoonDustInventory>();
             var world = inv?.World ?? FindFirst<MoonWorld>();
