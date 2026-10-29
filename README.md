@@ -16,16 +16,25 @@ The whole **Twitch side is complete and working**: OAuth, token refresh, EventSu
 connection with auto-reconnect, channel-point and bits subscriptions, and routing
 events to named effects via your config.
 
-The **"make it happen in the game" side is intentionally stubbed.** This mod was
-written without access to Moon Sweepers' compiled code, so the game's real internal
-class names aren't known. Out of the box every effect shows an on-screen toast and
-logs to the BepInEx console — enough to prove the whole pipeline end-to-end — but to
-actually spawn dust, shake the moon, give money, etc. you finish one file:
-[`src/Game/GameBridge.cs`](src/Game/GameBridge.cs). It's heavily commented with the
-exact pattern to follow. See [Wiring effects into the game](#wiring-effects-into-the-game).
+Four **chat sabotage effects are implemented** against the real game code (host-local,
+tested in-game):
 
-There's also a **test hotkey (F8 by default)** so you can confirm the mod loads and
-effects fire without even opening Twitch.
+| Key | What it does |
+|---|---|
+| `breakdown` | Ejects the streamer from any vehicle and keeps them out of vehicles for 15 minutes. |
+| `toothbrush` | Locks the toolbelt to the toothbrush for 5 minutes. |
+| `emptydust` | Drops all held moon dust on the ground as 1 kg canisters (5 kg held = 5 canisters). |
+| `refilldust` | Re-dusts a random sector the streamer has fully cleared, live, keeping its hex shape. |
+
+The remaining template effects (`confetti`, `fog`, `dropdust`, `earthquake`,
+`speedboost`, `slowmo`, `payout`) are still stubs that only log; to make one real,
+finish its method in [`src/Game/GameBridge.cs`](src/Game/GameBridge.cs). See
+[Wiring effects into the game](#wiring-effects-into-the-game).
+
+There are two **test hotkeys** (F8 and F9 by default, each mapped to an effect in the
+config) so you can fire effects without opening Twitch. On-screen toasts don't show on
+this build of the game (its IMGUI is stripped), so check the BepInEx log to confirm an
+effect fired.
 
 ---
 
@@ -130,8 +139,9 @@ BitMappings = 1=>confetti || 100=>fog || 1000=>earthquake
 - Channel Point rewards match by **title** (case-insensitive). To match by the reward's
   stable id instead, use `id:<reward-id>=>effectKey`. Turn on `DebugLogging` to print
   titles and ids when you redeem.
-- Built-in effect keys: `confetti`, `fog`, `dropdust`, `earthquake`, `speedboost`,
-  `slowmo`, `payout`.
+- Built-in effect keys: `breakdown`, `toothbrush`, `emptydust`, `refilldust` (working),
+  plus the stubbed `confetti`, `fog`, `dropdust`, `earthquake`, `speedboost`, `slowmo`,
+  `payout`.
 
 ---
 
@@ -169,6 +179,12 @@ To make one real:
 
 Everything in `GameBridge` runs on the Unity **main thread**, so it's safe to touch
 Unity objects there.
+
+> **Stripped Unity APIs.** This IL2CPP build drops Unity methods the game never calls,
+> and calling one throws "Method unstripping failed". In particular
+> `Object.FindObjectOfType<T>()` is gone: use `GameBridge.FindFirst<T>()`, which falls
+> back through lookups the build keeps. If a new effect seems to do nothing, check
+> `BepInEx\LogOutput.log` for that message first.
 
 > **Multiplayer caveat.** Moon Sweepers is co-op (up to 16 players). Client-side edits
 > to **shared** state (money, spawned objects, world state) may not replicate to other
