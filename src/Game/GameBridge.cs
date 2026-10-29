@@ -257,6 +257,81 @@ namespace MoonSweepersTwitch.Game
                 $"refresh {(ok ? "completed" : "STOPPED at failure")}. ({ctx.Describe()})");
         }
 
+        // Redraw-lab state: the sector being tested and the next strategy to try.
+        private static int _labRegion = -1;
+        private static int _labStep;
+
+        /// <summary>
+        /// Test harness for the live redraw (temporary; bound to the "redrawlab" effect).
+        /// First press: un-complete the cleared sector nearest the player (data only, so it
+        /// stays clean-looking). Each later press tries ONE redraw strategy on that sector's
+        /// chunk, in order, so the player can report which press made it turn dusty. No
+        /// strategy rebuilds collision.
+        /// </summary>
+        public static void RedrawLab(EffectContext ctx)
+        {
+            var inv = FindFirst<MoonDustInventory>();
+            var world = inv?.World ?? FindFirst<MoonWorld>();
+            var walker = inv?.walker;
+            var d = world != null ? ReadRegions(world) : null;
+            if (world == null || walker == null || d == null)
+            {
+                Plugin.Log.LogInfo($"[GameBridge] RedrawLab: world/walker/regions unavailable. ({ctx.Describe()})");
+                return;
+            }
+
+            if (_labRegion < 0)
+            {
+                Vector3 dir = walker.transform.position.normalized;
+                int id = NearestRegion(d, dir, i => d.States[i] == 1);
+                if (id < 0)
+                {
+                    Plugin.Log.LogInfo("[GameBridge] RedrawLab: no cleared sectors left to test with.");
+                    return;
+                }
+                if (!UncompleteRegion(d, id)) return;
+
+                float deg = Mathf.Acos(Mathf.Clamp(Vector3.Dot(d.Centers[id].normalized, dir), -1f, 1f)) * Mathf.Rad2Deg;
+                _labRegion = id;
+                _labStep = 0;
+                Plugin.Log.LogInfo(
+                    $"[GameBridge] RedrawLab: press 1 un-completed the nearest cleared sector {id} ({deg:0.##}° away). " +
+                    "Watch it; each next press tries one redraw step.");
+                return;
+            }
+
+            var chunk = world.ChunkAt(d.Centers[_labRegion].normalized, out Vector2 _local);
+            if (chunk == null)
+            {
+                Plugin.Log.LogWarning($"[GameBridge] RedrawLab: no chunk at sector {_labRegion}; resetting.");
+                _labRegion = -1;
+                return;
+            }
+            int chunkId = world.ChunkId(chunk);
+
+            var steps = new (string name, Action act)[]
+            {
+                ("InvalidateDustBank + CompletePendingDustBanks", () => { world.InvalidateDustBank(chunk); world.CompletePendingDustBanks(); }),
+                ("EnsureDustLayers", () => world.EnsureDustLayers(chunk)),
+                ("CheckLoadedDust", () => world.CheckLoadedDust(chunk, chunkId)),
+                ("RefreshDetails(true)", () => world.RefreshDetails(true)),
+                ("RestoreRenderingBindings", () => world.RestoreRenderingBindings()),
+                ("RefreshCleanedMesh(detailed: false)", () => world.RefreshCleanedMesh(chunk, false, new Rect(0f, 0f, 1f, 1f))),
+                ("DustTruthPuttingAway + DustTruthLoaded", () => { world.DustTruthPuttingAway(chunk); world.DustTruthLoaded(chunk); }),
+                ("BindDustBank + BindFarMask", () => { world.BindDustBank(chunk); world.BindFarMask(chunk); }),
+            };
+
+            int k = _labStep++;
+            int press = k + 2; // press 1 was the un-complete
+            Step($"RedrawLab press {press}: step {k + 1}/{steps.Length} {steps[k].name} (sector {_labRegion}, chunk {chunkId})", steps[k].act);
+
+            if (_labStep >= steps.Length)
+            {
+                Plugin.Log.LogInfo("[GameBridge] RedrawLab: all steps tried. The next press starts over with a new sector.");
+                _labRegion = -1;
+            }
+        }
+
         private static int NearestRegion(RegionData d, Vector3 dir, Func<int, bool> accept)
         {
             int best = -1;

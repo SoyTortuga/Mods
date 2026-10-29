@@ -49,6 +49,9 @@ namespace MoonSweepersTwitch.Game
                 GameBridge.RefillRandomSector(ctx);
             }));
 
+            // Temporary test harness for refilldust's live redraw; not listed in EffectKeyList.
+            registry.Register(new Effect("redrawlab", "Redraw test", ctx => GameBridge.RedrawLab(ctx)));
+
             // --- Original template effects (still stubbed in GameBridge) ---
 
             registry.Register(new Effect("confetti", "Confetti burst", ctx =>
