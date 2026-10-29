@@ -16,8 +16,8 @@ The whole **Twitch side is complete and working**: OAuth, token refresh, EventSu
 connection with auto-reconnect, channel-point and bits subscriptions, and routing
 events to named effects via your config.
 
-The **chat sabotage effects below are implemented** against the real game code (host-local,
-tested in-game):
+The **chat sabotage effects below are implemented** against the real game code. The first
+four (`breakdown` to `refilldust`) are tested in-game; the rest are new and still being tested:
 
 | Key | What it does |
 |---|---|
