@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using MoonCleaners;
 using MoonSweepersTwitch.Util;
 using UnityEngine;
@@ -40,6 +41,8 @@ namespace MoonSweepersTwitch.Game
         // Latches so the "effect ended" feedback fires exactly once.
         private static bool _vehiclesWasBroken;
         private static bool _toothbrushWasActive;
+
+        private static readonly System.Random _rng = new System.Random();
 
         /// <summary>True while the vehicle-breakdown window is active.</summary>
         public static bool VehiclesBroken => Time.realtimeSinceStartup < _vehiclesBrokenUntil;
@@ -120,6 +123,95 @@ namespace MoonSweepersTwitch.Game
             }
 
             Plugin.Log.LogInfo($"[GameBridge] Dropped {dropped} dust canister(s) ({ctx.Describe()}).");
+        }
+
+        /// <summary>
+        /// Refill a random already-cleared hex sector with dust.
+        ///
+        /// EXPERIMENTAL: the game has no additive dust API — cleaning is one-directional
+        /// (<c>CleanAt</c> reduces a per-direction "remaining" value, 0 = cleared). The
+        /// bet here is that cleaning does <c>remaining -= dose</c> (clamped), so a
+        /// NEGATIVE dose adds dust back and rides the same networked path as real
+        /// cleaning. We log remaining-before/after so a live test shows whether it took;
+        /// if negative dose is clamped away, this is a no-op and we fall back to writing
+        /// the dust data directly.
+        /// </summary>
+        public static void RefillRandomSector(EffectContext ctx)
+        {
+            var world = Object.FindObjectOfType<MoonWorld>();
+            if (world == null)
+            {
+                Plugin.Log.LogInfo($"[GameBridge] RefillSector: no MoonWorld (not in-game?). ({ctx.Describe()})");
+                return;
+            }
+
+            var regions = world.Regions;
+            int count = (regions != null) ? regions.Count : 0;
+            if (regions == null || count <= 0)
+            {
+                Plugin.Log.LogWarning("[GameBridge] RefillSector: no regions available.");
+                return;
+            }
+
+            // A sector is "cleared" when its remaining dust is ~0.
+            var cleared = new List<int>();
+            var remaining = world.regionRemaining;
+            if (remaining != null && remaining.Length >= count)
+            {
+                for (int i = 0; i < count; i++)
+                    if (remaining[i] <= 0.01f) cleared.Add(i);
+            }
+            else
+            {
+                // Fall back to sampling the surface at each region centre.
+                for (int i = 0; i < count; i++)
+                    if (world.RemainingAt(regions.Centers[i].normalized) <= 0.01f) cleared.Add(i);
+            }
+
+            if (cleared.Count == 0)
+            {
+                Plugin.Log.LogInfo("[GameBridge] RefillSector: no cleared sectors to refill.");
+                OnScreenMessages.Show("✨ Nothing's clean enough to re-dust!", 5f);
+                return;
+            }
+
+            int id = cleared[_rng.Next(cleared.Count)];
+            Vector3 dir = regions.Centers[id].normalized;
+
+            // Calibrate the moon radius from the local player's distance to the centre,
+            // so we don't need the game's private radius field.
+            Vector3 center = world.transform.position;
+            var walker = Object.FindObjectOfType<MoonWalker>();
+            float radius = (walker != null) ? (walker.transform.position - center).magnitude : 0f;
+            if (radius <= 0.01f) radius = 100f; // only the direction matters for sampling
+
+            Vector3 point = center + dir * radius;
+            float width = regions.ActualDiameter;
+            if (width <= 0f) width = radius * 0.1f;
+
+            float before = world.RemainingAt(dir);
+            int changed = world.CleanAt(point, width, -1f); // negative dose = add dust (hypothesis)
+
+            // Cover the hex more fully by also dosing each corner.
+            var corners = regions.Corners(id);
+            if (corners != null)
+            {
+                for (int c = 0; c < corners.Length; c++)
+                {
+                    Vector3 cp = center + corners[c].normalized * radius;
+                    changed += world.CleanAt(cp, width * 0.6f, -1f);
+                }
+            }
+
+            float after = world.RemainingAt(dir);
+            Plugin.Log.LogInfo(
+                $"[GameBridge] RefillSector region {id}: remaining {before:0.###} -> {after:0.###}, " +
+                $"texels changed {changed}, width {width:0.##}. ({ctx.Describe()})");
+
+            if (after > before + 0.001f)
+                OnScreenMessages.Show($"🌋 Sector {id} re-dusted!", 5f);
+            else
+                OnScreenMessages.Show($"⚠ Sector {id} refill had no effect (negative dose may be clamped).", 6f);
         }
 
         /// <summary>

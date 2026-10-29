@@ -13,7 +13,7 @@ namespace MoonSweepersTwitch.Game
     {
         /// <summary>Keys usable in RewardMappings / BitMappings, for config docs.</summary>
         public const string EffectKeyList =
-            "breakdown, toothbrush, emptydust, confetti, fog, dropdust, earthquake, speedboost, slowmo, payout";
+            "breakdown, toothbrush, emptydust, refilldust, confetti, fog, dropdust, earthquake, speedboost, slowmo, payout";
 
         public static void RegisterBuiltIns(EffectRegistry registry, PluginConfig config)
         {
@@ -41,6 +41,12 @@ namespace MoonSweepersTwitch.Game
             {
                 Feedback(ctx, "🫙 Your dust spills out!");
                 GameBridge.DropDustCanisters(ctx); // drops 1 canister per kg held
+            }));
+
+            registry.Register(new Effect("refilldust", "Re-dust a sector", ctx =>
+            {
+                Feedback(ctx, "🌑 A sector gets dusty again!");
+                GameBridge.RefillRandomSector(ctx);
             }));
 
             // --- Original template effects (still stubbed in GameBridge) ---
