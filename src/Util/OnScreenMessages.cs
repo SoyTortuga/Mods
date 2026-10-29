@@ -43,6 +43,26 @@ namespace MoonSweepersTwitch.Util
         {
             if (!Enabled) return;
 
+            // Some IL2CPP builds strip the IMGUI control-id plumbing GUI.Box relies on
+            // (GUIUtility.GetControlID -> "Method unstripping failed"), which would throw
+            // every frame once a toast is queued. If drawing ever fails, disable the
+            // overlay for good (and log once) instead of spamming the error.
+            try
+            {
+                DrawInternal();
+            }
+            catch (System.Exception ex)
+            {
+                Enabled = false;
+                lock (Gate) Toasts.Clear();
+                Plugin.Log.LogWarning(
+                    "[OnScreenMessages] On-screen toasts disabled (IMGUI unavailable on this build): "
+                    + ex.Message + ". Effects still run; watch the BepInEx log for confirmation.");
+            }
+        }
+
+        private static void DrawInternal()
+        {
             float now = Time.realtimeSinceStartup;
             _style ??= new GUIStyle(GUI.skin.box)
             {

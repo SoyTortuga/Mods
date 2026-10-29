@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using Il2CppInterop.Runtime;
+using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using MoonCleaners;
 using MoonSweepersTwitch.Util;
 using UnityEngine;
@@ -86,7 +88,7 @@ namespace MoonSweepersTwitch.Game
         /// </summary>
         public static void DropDustCanisters(EffectContext ctx)
         {
-            var inv = Object.FindObjectOfType<MoonDustInventory>();
+            var inv = FindFirst<MoonDustInventory>();
             if (inv == null)
             {
                 Plugin.Log.LogInfo($"[GameBridge] DropDustCanisters: no dust inventory (not in-game?). ({ctx.Describe()})");
@@ -126,35 +128,100 @@ namespace MoonSweepersTwitch.Game
         }
 
         /// <summary>
-        /// Re-dust the moon by calling the game's own <c>MoonWorld.DevResetDust()</c>.
+        /// Refill a random already-cleared hex sector with dust.
         ///
-        /// The experimental per-sector approach (writing a chunk's coarse "remaining"
-        /// buffer directly) did not stick in a live save — the authoritative dust lives
-        /// in the game's dust-bank / clean-mask truth, and the coarse buffer gets
-        /// overwritten from it on the next refresh. <c>DevResetDust()</c> goes through
-        /// that authoritative path, so it actually re-dusts. The catch: it is the game's
-        /// own dev reset and re-dusts the WHOLE moon (undoing all cleaning progress),
-        /// not a single sector — the game exposes no reliable per-sector re-dust.
-        /// Host-local; not networked to crew.
+        /// The game has no additive dust API, so this writes the dust data directly:
+        /// it finds the chunk under the sector's centre (<see cref="MoonWorld.ChunkAt"/>),
+        /// refills that chunk's coarse per-cell "remaining" buffer to full, re-uploads
+        /// the texture/mesh/collision through the game's own cleaning-refresh methods
+        /// (which are NOT stripped — the game uses them while you clean), and resets the
+        /// region's aggregate remaining so progress + UI follow.
+        ///
+        /// Note: an earlier attempt looked like it did nothing, but that was the stripped
+        /// <c>FindObjectOfType</c> throwing before any of this ran. Now that the MoonWorld
+        /// lookup goes through <see cref="FindFirst{T}"/>, the before/after dust reading is
+        /// logged so we can see whether the write actually takes. Caveats: it re-dusts a
+        /// whole chunk (roughly a sector), it's host-local (not networked to crew), and it
+        /// may not survive a save/reload.
         /// </summary>
         public static void RefillRandomSector(EffectContext ctx)
         {
-            var world = Object.FindObjectOfType<MoonWorld>();
+            var world = FindFirst<MoonWorld>();
             if (world == null)
             {
                 Plugin.Log.LogInfo($"[GameBridge] RefillSector: no MoonWorld (not in-game?). ({ctx.Describe()})");
                 return;
             }
 
-            bool ok = world.DevResetDust();
+            var regions = world.Regions;
+            int count = (regions != null) ? regions.Count : 0;
+            if (regions == null || count <= 0)
+            {
+                Plugin.Log.LogWarning("[GameBridge] RefillSector: no regions available.");
+                return;
+            }
 
-            Plugin.Log.LogInfo(
-                $"[GameBridge] DevResetDust -> {ok} (re-dusted the whole moon). ({ctx.Describe()})");
-
-            if (ok)
-                OnScreenMessages.Show("🌑 The whole moon is dusty again!", 5f);
+            // A sector is "cleared" when its remaining dust is ~0.
+            var cleared = new List<int>();
+            var remaining = world.regionRemaining;
+            if (remaining != null && remaining.Length >= count)
+            {
+                for (int i = 0; i < count; i++)
+                    if (remaining[i] <= 0.01f) cleared.Add(i);
+            }
             else
-                OnScreenMessages.Show("⚠ Couldn't re-dust the moon.", 6f);
+            {
+                for (int i = 0; i < count; i++)
+                    if (world.RemainingAt(regions.Centers[i].normalized) <= 0.01f) cleared.Add(i);
+            }
+
+            if (cleared.Count == 0)
+            {
+                Plugin.Log.LogInfo("[GameBridge] RefillSector: no cleared sectors to refill.");
+                OnScreenMessages.Show("✨ Nothing's clean enough to re-dust!", 5f);
+                return;
+            }
+
+            int id = cleared[_rng.Next(cleared.Count)];
+            Vector3 dir = regions.Centers[id].normalized;
+            float before = world.RemainingAt(dir);
+
+            var chunk = world.ChunkAt(dir, out Vector2 _local);
+            int cells = 0;
+            if (chunk != null)
+            {
+                var coarse = chunk.coarseRemaining;
+                if (coarse != null)
+                {
+                    for (int k = 0; k < coarse.Length; k++) coarse[k] = byte.MaxValue; // full dust
+                    cells = coarse.Length;
+                }
+                world.UploadCleaning(chunk);
+                world.RefreshCleanedMesh(chunk, true, new Rect(0f, 0f, 1f, 1f));
+                world.QueueCleaningCollision(chunk);
+                world.UpdateCleaningCollisions();
+            }
+
+            // Make the region read as un-cleaned again.
+            if (remaining != null && remaining.Length > id)
+            {
+                float init = world.RegionInitialDust(id);
+                remaining[id] = (init > 0f) ? init : 1f;
+            }
+            world.MarkRegionTouched(id);
+            world.QueueRegionCheck(id);
+
+            float after = world.RemainingAt(dir);
+            Plugin.Log.LogInfo(
+                $"[GameBridge] RefillSector region {id}: chunk={(chunk != null)}, coarseCells={cells}, " +
+                $"remaining {before:0.###} -> {after:0.###}. ({ctx.Describe()})");
+
+            if (chunk != null && cells > 0 && after > before + 0.001f)
+                OnScreenMessages.Show($"🌑 Sector {id} re-dusted!", 5f);
+            else if (chunk != null && cells > 0)
+                OnScreenMessages.Show($"⚠ Sector {id}: wrote dust data, but it didn't stick.", 6f);
+            else
+                OnScreenMessages.Show($"⚠ Sector {id}: couldn't reach the dust data.", 6f);
         }
 
         /// <summary>
@@ -262,7 +329,7 @@ namespace MoonSweepersTwitch.Game
             // MoonVehiclePassenger exists only on the local player, so FindObjectOfType
             // returns the host's own passenger (remote crew use separate components).
             if (_passenger == null)
-                _passenger = Object.FindObjectOfType<MoonVehiclePassenger>();
+                _passenger = FindFirst<MoonVehiclePassenger>();
             return _passenger;
         }
 
@@ -270,10 +337,82 @@ namespace MoonSweepersTwitch.Game
         {
             if (_toolbelt == null)
             {
-                _toolbelt = Object.FindObjectOfType<MoonToolbelt>();
+                _toolbelt = FindFirst<MoonToolbelt>();
                 _brushSlot = -1; // new toolbelt -> re-resolve the brush slot
             }
             return _toolbelt;
+        }
+
+        // =====================================================================
+        //  Object lookup
+        // =====================================================================
+
+        /// <summary>
+        /// Find the first live instance of a game component.
+        ///
+        /// This IL2CPP build STRIPS <c>UnityEngine.Object.FindObjectOfType&lt;T&gt;()</c>
+        /// (it routes to <c>FindObjectOfType(Type, bool)</c>, which throws
+        /// "Method unstripping failed" — the shipped game never calls it, so il2cpp
+        /// dropped it). So we try the lookup APIs the game DOES keep, in order of how
+        /// likely Unity 6 retains them, and use whichever one works. Each attempt is
+        /// guarded because calling a stripped method throws.
+        /// </summary>
+        private static T? FindFirst<T>() where T : Object
+        {
+            var type = Il2CppType.Of<T>();
+
+            // Unity 6's current API — the game uses it, so it is almost certainly kept.
+            if (TryArr<T>(() => Object.FindObjectsByType<T>(FindObjectsSortMode.None),
+                       "Object.FindObjectsByType", out var a)) return a;
+
+            // Older generic scene/all-objects searches.
+            if (TryArr<T>(() => Object.FindObjectsOfType<T>(),
+                       "Object.FindObjectsOfType", out var b)) return b;
+            if (TryArr<T>(() => Resources.FindObjectsOfTypeAll<T>(),
+                       "Resources.FindObjectsOfTypeAll", out var c)) return c;
+
+            // Non-generic Type-based forms as a last resort.
+            if (TryArrObj<T>(() => Object.FindObjectsOfType(type),
+                          "Object.FindObjectsOfType(Type)", out var d)) return d;
+            if (TryArrObj<T>(() => Resources.FindObjectsOfTypeAll(type),
+                          "Resources.FindObjectsOfTypeAll(Type)", out var e)) return e;
+
+            Plugin.Log.LogWarning($"[GameBridge] FindFirst<{typeof(T).Name}>: no working lookup API.");
+            return null;
+        }
+
+        private static bool TryArr<T>(Func<Il2CppArrayBase<T>> get, string label, out T? first)
+            where T : Object
+        {
+            first = null;
+            try
+            {
+                var arr = get();
+                if (arr != null && arr.Length > 0) first = arr[0];
+                return first != null;
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning($"[GameBridge] {label}<{typeof(T).Name}> unavailable: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static bool TryArrObj<T>(Func<Il2CppArrayBase<Object>> get, string label, out T? first)
+            where T : Object
+        {
+            first = null;
+            try
+            {
+                var arr = get();
+                if (arr != null && arr.Length > 0) first = arr[0]?.TryCast<T>();
+                return first != null;
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning($"[GameBridge] {label}<{typeof(T).Name}> unavailable: {ex.Message}");
+                return false;
+            }
         }
 
         // =====================================================================
