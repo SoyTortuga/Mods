@@ -364,9 +364,33 @@ namespace MoonSweepersTwitch.Game
 
         private static void TryEjectFromVehicle()
         {
+            // Driving and riding are separate systems: the driver is "mounted" on a
+            // MoonPrototypeVehicle through the walker, while a rider sits via
+            // MoonVehiclePassenger. Handle both.
+            var w = LocalWalker();
+            if (w != null && w.Mounted)
+            {
+                var v = w.mountedVehicle;
+                bool ok = v != null && v.Exit(false);
+                ThrottledLog($"[GameBridge] Breakdown: driver seat -> Exit() {(ok ? "ok" : "refused or no vehicle")}.");
+            }
+
             var p = Passenger();
             if (p != null && p.Seated)
+            {
                 p.GetOut();
+                ThrottledLog("[GameBridge] Breakdown: passenger seat -> GetOut().");
+            }
+        }
+
+        private static float _nextThrottledLogAt;
+
+        /// <summary>Log at most once a second, for actions that can repeat every frame.</summary>
+        private static void ThrottledLog(string message)
+        {
+            if (Time.realtimeSinceStartup < _nextThrottledLogAt) return;
+            _nextThrottledLogAt = Time.realtimeSinceStartup + 1f;
+            Plugin.Log.LogInfo(message);
         }
 
         private static void EnforceToothbrush()
@@ -378,13 +402,29 @@ namespace MoonSweepersTwitch.Game
                 _brushSlot = ResolveBrushSlot(tb);
             if (_brushSlot < 0) return;
 
+            // Diagnostic: log the toolbelt's state whenever it changes, to see what the
+            // game reports while the player tries to switch tools.
+            string state =
+                $"selected={tb.SelectedIndex} prototype={tb.IsPrototypeEquipped} " +
+                $"tool='{tb.SelectedTool?.displayName}' brushEquipped={tb.BrushEquipped}";
+            if (state != _lastBeltState)
+            {
+                _lastBeltState = state;
+                Plugin.Log.LogInfo($"[GameBridge] Toothbrush: toolbelt {state} (brush slot {_brushSlot}).");
+            }
+
             // A "prototype" tool is equipped as an overlay on top of the slot; drop it.
             if (tb.IsPrototypeEquipped)
                 tb.ClearPrototype();
 
             if (tb.SelectedIndex != _brushSlot)
-                tb.SelectSlot(_brushSlot);
+            {
+                bool ok = tb.SelectSlot(_brushSlot);
+                ThrottledLog($"[GameBridge] Toothbrush: SelectSlot({_brushSlot}) -> {ok}.");
+            }
         }
+
+        private static string? _lastBeltState;
 
         /// <summary>
         /// Find the toolbelt slot holding the toothbrush. Matches the tool's id/name on
@@ -426,13 +466,25 @@ namespace MoonSweepersTwitch.Game
             return 0;
         }
 
+        private static MoonWalker? _walker;
+        private static float _walkerRetryAt;
+
+        /// <summary>The local player's walker, taken from the local dust inventory.</summary>
+        private static MoonWalker? LocalWalker()
+        {
+            if (_walker == null && Time.realtimeSinceStartup >= _walkerRetryAt)
+            {
+                _walker = FindFirst<MoonDustInventory>()?.walker;
+                if (_walker == null) _walkerRetryAt = Time.realtimeSinceStartup + 2f;
+            }
+            return _walker;
+        }
+
         private static MoonVehiclePassenger? Passenger()
         {
-            // MoonVehiclePassenger exists only on the local player, so the first match is
-            // the host's own passenger (remote crew use separate components).
             if (_passenger == null && Time.realtimeSinceStartup >= _passengerRetryAt)
             {
-                _passenger = FindFirst<MoonVehiclePassenger>();
+                _passenger = PickOwned<MoonVehiclePassenger>(p => p.walker, "passenger");
                 if (_passenger == null) _passengerRetryAt = Time.realtimeSinceStartup + 2f;
             }
             return _passenger;
@@ -442,11 +494,44 @@ namespace MoonSweepersTwitch.Game
         {
             if (_toolbelt == null && Time.realtimeSinceStartup >= _toolbeltRetryAt)
             {
-                _toolbelt = FindFirst<MoonToolbelt>();
+                _toolbelt = PickOwned<MoonToolbelt>(t => t.walker, "toolbelt");
                 if (_toolbelt == null) _toolbeltRetryAt = Time.realtimeSinceStartup + 2f;
                 _brushSlot = -1; // new toolbelt -> re-resolve the brush slot
             }
             return _toolbelt;
+        }
+
+        /// <summary>
+        /// Of every live <typeparamref name="T"/>, return the one whose walker is the local
+        /// player's. There can be more than one (co-op crew, or extra instances), so the first
+        /// match isn't necessarily ours. Falls back to the first instance if none match, and
+        /// logs what it found.
+        /// </summary>
+        private static T? PickOwned<T>(Func<T, MoonWalker?> walkerOf, string label) where T : Object
+        {
+            var local = LocalWalker();
+            Il2CppArrayBase<T>? all;
+            try { all = Object.FindObjectsByType<T>(FindObjectsSortMode.None); }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning($"[GameBridge] Find {label}s failed: {ex.Message}");
+                return null;
+            }
+            if (all == null || all.Length == 0) return null;
+
+            int picked = -1;
+            for (int i = 0; i < all.Length && picked < 0; i++)
+            {
+                var w = all[i] != null ? walkerOf(all[i]) : null;
+                if (local != null && w != null && w.Pointer == local.Pointer) picked = i;
+            }
+            bool matched = picked >= 0;
+            if (!matched) picked = 0;
+
+            Plugin.Log.LogInfo(
+                $"[GameBridge] Found {all.Length} {label}(s); using #{picked} " +
+                $"({(matched ? "matches the local player" : local == null ? "local player unknown" : "no match, first one")}).");
+            return all[picked];
         }
 
         // =====================================================================
