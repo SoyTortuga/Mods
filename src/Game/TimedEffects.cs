@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using MoonCleaners;
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
@@ -189,6 +190,103 @@ namespace MoonSweepersTwitch.Game
         }
     }
 
+    /// <summary>
+    /// Tiny Pockets: cuts how much dust the player can carry to a quarter.
+    ///
+    /// The game works capacity out (<c>MoonWorld.InventoryCapacityKg</c>) from a small base
+    /// (<c>MoonSettings.inventoryCapacityKg</c>, 1 kg) plus the dust container's capacity,
+    /// which comes from that tool definition's <c>containerKg</c>. Scaling only the base did
+    /// nothing noticeable, so this scales the base and every container tool's
+    /// <c>containerKg</c>, and logs the real total before and after.
+    /// </summary>
+    internal sealed class TinyPocketsEffect : TimedEffect
+    {
+        private const float Factor = 0.25f;
+        private MoonSettings? _settings;
+        private float? _baseKg;
+        private readonly List<(MoonToolDefinition tool, float kg)> _containers =
+            new List<(MoonToolDefinition tool, float kg)>();
+        private bool _containersCaptured;
+
+        public override string Name => "Tiny pockets";
+
+        protected override bool TryApply()
+        {
+            var inv = GameBridge.FindFirst<MoonDustInventory>();
+            var world = inv?.World;
+            string? player = inv?.playerId;
+            if (world == null || string.IsNullOrEmpty(player)) return false;
+
+            _settings = world.settings;
+            double before = world.InventoryCapacityKg(player);
+
+            _baseKg ??= _settings.inventoryCapacityKg;
+            _settings.inventoryCapacityKg = _baseKg.Value * Factor;
+
+            if (!_containersCaptured)
+            {
+                foreach (var tool in ContainerTools(world, player!))
+                    _containers.Add((tool, tool.containerKg));
+                _containersCaptured = true;
+            }
+            foreach (var (tool, kg) in _containers) tool.containerKg = kg * Factor;
+
+            double after = world.InventoryCapacityKg(player);
+            Plugin.Log.LogInfo(
+                $"[Timed] Tiny pockets: carrying capacity {before:0.##} kg -> {after:0.##} kg " +
+                $"(base {_baseKg.Value:0.##} -> {_settings.inventoryCapacityKg:0.##}, {_containers.Count} container tool(s)).");
+            return true;
+        }
+
+        protected override void Revert()
+        {
+            if (_settings != null && _baseKg.HasValue) _settings.inventoryCapacityKg = _baseKg.Value;
+            foreach (var (tool, kg) in _containers)
+                if (tool != null) tool.containerKg = kg;
+            _settings = null;
+            _baseKg = null;
+            _containers.Clear();
+            _containersCaptured = false;
+        }
+
+        /// <summary>
+        /// Every tool definition that holds dust. Tool definitions are assets rather than
+        /// scene objects, so they're listed through <c>Resources.FindObjectsOfTypeAll</c>,
+        /// falling back to the player's loadout if that lookup isn't available.
+        /// </summary>
+        private static List<MoonToolDefinition> ContainerTools(MoonWorld world, string player)
+        {
+            var found = new List<MoonToolDefinition>();
+            void Add(MoonToolDefinition? t)
+            {
+                if (t == null || t.containerKg <= 0f) return;
+                for (int i = 0; i < found.Count; i++)
+                    if (found[i].Pointer == t.Pointer) return;
+                found.Add(t);
+            }
+
+            try
+            {
+                var all = Resources.FindObjectsOfTypeAll<MoonToolDefinition>();
+                for (int i = 0; all != null && i < all.Length; i++) Add(all[i]);
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning("[Timed] Tiny pockets: listing tool assets failed (" + ex.Message + "); using the loadout.");
+            }
+
+            if (found.Count == 0)
+            {
+                for (int slot = 0; slot < 10; slot++)
+                {
+                    try { Add(world.LoadoutTool(player, slot)); } catch { }
+                }
+                try { Add(world.HeldTool(player)); } catch { }
+            }
+            return found;
+        }
+    }
+
     /// <summary>Lights Out: keeps the local player's helmet lamp switched off.</summary>
     internal sealed class LightsOutEffect : TimedEffect
     {
@@ -342,8 +440,7 @@ namespace MoonSweepersTwitch.Game
             ("dollarsPerKilogram", s => s.dollarsPerKilogram, (s, v) => s.dollarsPerKilogram = v),
             ("dollarsPerSection", s => s.dollarsPerSection, (s, v) => s.dollarsPerSection = v));
 
-        public static readonly SettingsScaleEffect TinyPockets = new SettingsScaleEffect("Tiny pockets", 0.25f,
-            ("inventoryCapacityKg", s => s.inventoryCapacityKg, (s, v) => s.inventoryCapacityKg = v));
+        public static readonly TinyPocketsEffect TinyPockets = new TinyPocketsEffect();
 
         public static readonly SettingsScaleEffect Butterfingers = new SettingsScaleEffect("Butterfingers", 0.5f,
             ("canisterPickupReach", s => s.canisterPickupReach, (s, v) => s.canisterPickupReach = v));
