@@ -84,6 +84,200 @@ namespace MoonSweepersTwitch.Game
             _brushSlot = -1; // re-resolve against the current toolbelt
             Plugin.Log.LogInfo(
                 $"[GameBridge] Toothbrush-only for {seconds:0}s ({ctx.Describe()}).");
+
+            // Re-triggering while active only extends the timer; the original tool stays
+            // remembered from the first swap.
+            if (_swapOriginal == null)
+                TrySwapInToothbrush();
+        }
+
+        // =====================================================================
+        //  Toothbrush loadout swap
+        // =====================================================================
+        // The brush slot (toolbelt slot 0) holds whichever brush the player equipped,
+        // e.g. the "Extra wide broom", so locking the slot isn't enough. While the effect
+        // runs, the player's loadout puts the toothbrush in that slot, then restores the
+        // original. The game autosaves, so a restore note is written to disk before the
+        // swap and deleted after the restore; if a session ends mid-effect, the next one
+        // finds the note and restores the tool.
+
+        private const string ToothbrushId = "toothbrush";
+        private static string? _swapPlayer;
+        private static int _swapSlot = -1;
+        private static string? _swapOriginal;
+        private static bool _pendingRestoreChecked;
+        private static float _pendingRestoreRetryAt;
+
+        private static string RestoreNotePath => System.IO.Path.Combine(
+            BepInEx.Paths.ConfigPath, "com.soytortuga.moonsweepers.twitch.toothbrush-restore.txt");
+
+        private static void TrySwapInToothbrush()
+        {
+            try
+            {
+                var inv = FindFirst<MoonDustInventory>();
+                var world = inv?.World;
+                string? player = inv?.playerId;
+                var tb = Toolbelt();
+                if (world == null || string.IsNullOrEmpty(player) || tb == null)
+                {
+                    Plugin.Log.LogWarning("[GameBridge] Toothbrush swap: world/player/toolbelt unavailable; only locking the slot.");
+                    return;
+                }
+
+                int slot = ResolveBrushSlot(tb);
+                _brushSlot = slot;
+                var snap = world.PlayerLoadout(player);
+                var slots = snap?.slots;
+                if (snap == null || slots == null || slot < 0 || slot >= slots.Length)
+                {
+                    Plugin.Log.LogWarning($"[GameBridge] Toothbrush swap: no loadout slot {slot}; only locking the slot.");
+                    return;
+                }
+
+                string current = slots[slot];
+                if (current == ToothbrushId)
+                {
+                    Plugin.Log.LogInfo($"[GameBridge] Toothbrush swap: slot {slot} already holds the toothbrush.");
+                    return;
+                }
+                if (!OwnsTool(snap, tb, slot, ToothbrushId))
+                {
+                    Plugin.Log.LogWarning("[GameBridge] Toothbrush swap: player doesn't own a toothbrush; leaving the loadout alone.");
+                    return;
+                }
+
+                // Write the note first, so a crash right after the swap can still be undone.
+                WriteRestoreNote(player!, slot, current);
+                slots[slot] = ToothbrushId;
+                world.CommitLoadout(player);
+
+                string now = world.LoadoutToolId(player, slot);
+                if (now == ToothbrushId)
+                {
+                    _swapPlayer = player;
+                    _swapSlot = slot;
+                    _swapOriginal = current;
+                    Plugin.Log.LogInfo($"[GameBridge] Toothbrush swap: slot {slot} '{current}' -> '{now}'.");
+                }
+                else
+                {
+                    // PlayerLoadout may have handed back a copy; undo the edit to it and drop the note.
+                    slots[slot] = current;
+                    DeleteRestoreNote();
+                    Plugin.Log.LogWarning(
+                        $"[GameBridge] Toothbrush swap didn't take: slot {slot} still '{now}'. Only locking the slot.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogError("[GameBridge] Toothbrush swap failed: " + ex.Message);
+            }
+        }
+
+        private static void EndToothbrushSwap()
+        {
+            if (_swapOriginal == null || _swapPlayer == null) return;
+            RestoreLoadout(_swapPlayer, _swapSlot, _swapOriginal, "effect ended");
+            _swapPlayer = null;
+            _swapSlot = -1;
+            _swapOriginal = null;
+        }
+
+        /// <summary>
+        /// Put <paramref name="original"/> back in the slot, but only if the slot still holds
+        /// the toothbrush we put there. Returns false if the world isn't ready yet.
+        /// </summary>
+        private static bool RestoreLoadout(string player, int slot, string original, string reason)
+        {
+            try
+            {
+                var inv = FindFirst<MoonDustInventory>();
+                var world = inv?.World;
+                if (world == null) return false;
+
+                var slots = world.PlayerLoadout(player)?.slots;
+                if (slots == null || slot < 0 || slot >= slots.Length) return false;
+
+                if (slots[slot] != ToothbrushId)
+                {
+                    Plugin.Log.LogInfo(
+                        $"[GameBridge] Toothbrush restore ({reason}): slot {slot} holds '{slots[slot]}', not the toothbrush; leaving it.");
+                    DeleteRestoreNote();
+                    return true;
+                }
+
+                slots[slot] = original;
+                world.CommitLoadout(player);
+                Plugin.Log.LogInfo(
+                    $"[GameBridge] Toothbrush restore ({reason}): slot {slot} -> '{world.LoadoutToolId(player, slot)}'.");
+                DeleteRestoreNote();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogError($"[GameBridge] Toothbrush restore ({reason}) failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static void CheckPendingRestore()
+        {
+            string path = RestoreNotePath;
+            if (!System.IO.File.Exists(path))
+            {
+                _pendingRestoreChecked = true;
+                return;
+            }
+
+            // Retry every few seconds until a save is loaded for the same player.
+            _pendingRestoreRetryAt = Time.realtimeSinceStartup + 5f;
+            string[] lines;
+            try { lines = System.IO.File.ReadAllLines(path); }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning("[GameBridge] Toothbrush restore note unreadable: " + ex.Message);
+                _pendingRestoreChecked = true;
+                return;
+            }
+            if (lines.Length < 3 || !int.TryParse(lines[1], out int slot))
+            {
+                Plugin.Log.LogWarning("[GameBridge] Toothbrush restore note is malformed; deleting it.");
+                DeleteRestoreNote();
+                _pendingRestoreChecked = true;
+                return;
+            }
+
+            var inv = FindFirst<MoonDustInventory>();
+            if (inv?.World == null || inv.playerId != lines[0]) return;
+
+            if (RestoreLoadout(lines[0], slot, lines[2], "left over from the last session"))
+                _pendingRestoreChecked = true;
+        }
+
+        private static bool OwnsTool(MoonUpgradeSnapshot snap, MoonToolbelt tb, int slot, string id)
+        {
+            var owned = snap.tools?.ToArray();
+            if (owned != null)
+                for (int i = 0; i < owned.Length; i++)
+                    if (owned[i] != null && owned[i].id == id) return true;
+
+            // The starter tool may not be listed; count the belt's base tool for the slot.
+            var baseTools = tb.tools;
+            var baseTool = baseTools != null && slot >= 0 && slot < baseTools.Length ? baseTools[slot] : null;
+            return baseTool != null && baseTool.toolId == id;
+        }
+
+        private static void WriteRestoreNote(string player, int slot, string original)
+        {
+            try { System.IO.File.WriteAllLines(RestoreNotePath, new[] { player, slot.ToString(), original }); }
+            catch (Exception ex) { Plugin.Log.LogWarning("[GameBridge] Couldn't write the toothbrush restore note: " + ex.Message); }
+        }
+
+        private static void DeleteRestoreNote()
+        {
+            try { if (System.IO.File.Exists(RestoreNotePath)) System.IO.File.Delete(RestoreNotePath); }
+            catch (Exception ex) { Plugin.Log.LogWarning("[GameBridge] Couldn't delete the toothbrush restore note: " + ex.Message); }
         }
 
         /// <summary>
@@ -348,9 +542,14 @@ namespace MoonSweepersTwitch.Game
                 }
                 else if (_toothbrushWasActive)
                 {
+                    EndToothbrushSwap();
                     OnScreenMessages.Show("🧰 Tools unlocked.", 4f);
                 }
                 _toothbrushWasActive = brushOnly;
+
+                // Put back a brush-slot tool left swapped by a session that ended mid-effect.
+                if (!brushOnly && !_pendingRestoreChecked && Time.realtimeSinceStartup >= _pendingRestoreRetryAt)
+                    CheckPendingRestore();
             }
             catch (Exception ex)
             {
