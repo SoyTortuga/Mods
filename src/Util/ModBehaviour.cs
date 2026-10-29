@@ -2,17 +2,23 @@ using System;
 using MoonSweepersTwitch.Config;
 using MoonSweepersTwitch.Game;
 using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.Controls;
 
 namespace MoonSweepersTwitch.Util
 {
     /// <summary>
     /// The one MonoBehaviour injected into IL2CPP. Gives the mod a per-frame
-    /// Update (to drain the dispatcher and poll the test hotkey) and OnGUI (overlay).
+    /// Update (to drain the dispatcher, enforce timed effects, and poll the test
+    /// hotkey) and OnGUI (overlay).
     /// </summary>
     public sealed class ModBehaviour : MonoBehaviour
     {
         private PluginConfig? _config;
         private EffectRegistry? _effects;
+
+        // Logged once if the configured hotkey can't be used, so we never spam.
+        private bool _hotkeyWarned;
 
         // Required constructor for IL2CPP-injected MonoBehaviours.
         public ModBehaviour(IntPtr ptr) : base(ptr) { }
@@ -28,13 +34,140 @@ namespace MoonSweepersTwitch.Util
         {
             MainThreadDispatcher.Drain();
 
+            // Enforce any active timed effects (vehicle breakdown, toothbrush-only).
+            GameBridge.Tick();
+
             if (_config == null || _effects == null) return;
 
-            var key = _config.TestEffectKey.Value;
-            if (key != KeyCode.None && Input.GetKeyDown(key))
+            PollTestHotkey();
+        }
+
+        private void PollTestHotkey()
+        {
+            // Moon Sweepers ships with the new Input System active, so the legacy
+            // UnityEngine.Input API throws every frame. Read the keyboard device instead.
+            try
             {
-                var effectKey = _config.TestEffectKeyName.Value;
-                _effects.Trigger(effectKey, EffectContext.Test(effectKey));
+                var code = _config!.TestEffectKey.Value;
+                if (code == KeyCode.None) return;
+
+                var keyboard = Keyboard.current;
+                if (keyboard == null) return;
+
+                var control = ResolveKeyControl(keyboard, code);
+                if (control == null)
+                {
+                    if (!_hotkeyWarned)
+                    {
+                        _hotkeyWarned = true;
+                        Plugin.Log.LogWarning(
+                            $"Test hotkey '{code}' isn't mapped to an Input System key; hotkey disabled.");
+                    }
+                    return;
+                }
+
+                if (control.wasPressedThisFrame)
+                {
+                    var effectKey = _config.TestEffectKeyName.Value;
+                    _effects!.Trigger(effectKey, EffectContext.Test(effectKey));
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!_hotkeyWarned)
+                {
+                    _hotkeyWarned = true;
+                    Plugin.Log.LogWarning("Test hotkey polling failed: " + ex.Message);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Map the legacy <see cref="KeyCode"/> stored in config to the new Input
+        /// System's named <see cref="KeyControl"/> on the current keyboard. Covers the
+        /// function, letter, digit, arrow and common editing/modifier keys; returns
+        /// null for anything unmapped (the hotkey then simply disables itself).
+        /// </summary>
+        private static KeyControl? ResolveKeyControl(Keyboard kb, KeyCode code)
+        {
+            switch (code)
+            {
+                case KeyCode.F1: return kb.f1Key;
+                case KeyCode.F2: return kb.f2Key;
+                case KeyCode.F3: return kb.f3Key;
+                case KeyCode.F4: return kb.f4Key;
+                case KeyCode.F5: return kb.f5Key;
+                case KeyCode.F6: return kb.f6Key;
+                case KeyCode.F7: return kb.f7Key;
+                case KeyCode.F8: return kb.f8Key;
+                case KeyCode.F9: return kb.f9Key;
+                case KeyCode.F10: return kb.f10Key;
+                case KeyCode.F11: return kb.f11Key;
+                case KeyCode.F12: return kb.f12Key;
+
+                case KeyCode.A: return kb.aKey;
+                case KeyCode.B: return kb.bKey;
+                case KeyCode.C: return kb.cKey;
+                case KeyCode.D: return kb.dKey;
+                case KeyCode.E: return kb.eKey;
+                case KeyCode.F: return kb.fKey;
+                case KeyCode.G: return kb.gKey;
+                case KeyCode.H: return kb.hKey;
+                case KeyCode.I: return kb.iKey;
+                case KeyCode.J: return kb.jKey;
+                case KeyCode.K: return kb.kKey;
+                case KeyCode.L: return kb.lKey;
+                case KeyCode.M: return kb.mKey;
+                case KeyCode.N: return kb.nKey;
+                case KeyCode.O: return kb.oKey;
+                case KeyCode.P: return kb.pKey;
+                case KeyCode.Q: return kb.qKey;
+                case KeyCode.R: return kb.rKey;
+                case KeyCode.S: return kb.sKey;
+                case KeyCode.T: return kb.tKey;
+                case KeyCode.U: return kb.uKey;
+                case KeyCode.V: return kb.vKey;
+                case KeyCode.W: return kb.wKey;
+                case KeyCode.X: return kb.xKey;
+                case KeyCode.Y: return kb.yKey;
+                case KeyCode.Z: return kb.zKey;
+
+                case KeyCode.Alpha0: return kb.digit0Key;
+                case KeyCode.Alpha1: return kb.digit1Key;
+                case KeyCode.Alpha2: return kb.digit2Key;
+                case KeyCode.Alpha3: return kb.digit3Key;
+                case KeyCode.Alpha4: return kb.digit4Key;
+                case KeyCode.Alpha5: return kb.digit5Key;
+                case KeyCode.Alpha6: return kb.digit6Key;
+                case KeyCode.Alpha7: return kb.digit7Key;
+                case KeyCode.Alpha8: return kb.digit8Key;
+                case KeyCode.Alpha9: return kb.digit9Key;
+
+                case KeyCode.Space: return kb.spaceKey;
+                case KeyCode.Return: return kb.enterKey;
+                case KeyCode.KeypadEnter: return kb.numpadEnterKey;
+                case KeyCode.Tab: return kb.tabKey;
+                case KeyCode.Escape: return kb.escapeKey;
+                case KeyCode.Backspace: return kb.backspaceKey;
+                case KeyCode.Delete: return kb.deleteKey;
+                case KeyCode.Insert: return kb.insertKey;
+                case KeyCode.Home: return kb.homeKey;
+                case KeyCode.End: return kb.endKey;
+                case KeyCode.PageUp: return kb.pageUpKey;
+                case KeyCode.PageDown: return kb.pageDownKey;
+                case KeyCode.UpArrow: return kb.upArrowKey;
+                case KeyCode.DownArrow: return kb.downArrowKey;
+                case KeyCode.LeftArrow: return kb.leftArrowKey;
+                case KeyCode.RightArrow: return kb.rightArrowKey;
+                case KeyCode.LeftShift: return kb.leftShiftKey;
+                case KeyCode.RightShift: return kb.rightShiftKey;
+                case KeyCode.LeftControl: return kb.leftCtrlKey;
+                case KeyCode.RightControl: return kb.rightCtrlKey;
+                case KeyCode.LeftAlt: return kb.leftAltKey;
+                case KeyCode.RightAlt: return kb.rightAltKey;
+                case KeyCode.BackQuote: return kb.backquoteKey;
+
+                default: return null;
             }
         }
 

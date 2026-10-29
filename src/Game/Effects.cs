@@ -13,7 +13,7 @@ namespace MoonSweepersTwitch.Game
     {
         /// <summary>Keys usable in RewardMappings / BitMappings, for config docs.</summary>
         public const string EffectKeyList =
-            "confetti, fog, dropdust, earthquake, speedboost, slowmo, payout";
+            "breakdown, toothbrush, confetti, fog, dropdust, earthquake, speedboost, slowmo, payout";
 
         public static void RegisterBuiltIns(EffectRegistry registry, PluginConfig config)
         {
@@ -22,6 +22,22 @@ namespace MoonSweepersTwitch.Game
                 if (config.ShowOnScreenFeedback.Value)
                     OnScreenMessages.Show($"{label}\n({ctx.Describe()})", 5f);
             }
+
+            // --- Chat sabotage effects (host-local, implemented) ---
+
+            registry.Register(new Effect("breakdown", "Vehicle breakdown", ctx =>
+            {
+                Feedback(ctx, "🚗💨 Vehicles broke down!");
+                GameBridge.BreakVehicles(ctx, seconds: 900f); // 15 minutes
+            }));
+
+            registry.Register(new Effect("toothbrush", "Toothbrush only", ctx =>
+            {
+                Feedback(ctx, "🪥 Toothbrush only!");
+                GameBridge.ToothbrushOnly(ctx, seconds: 300f); // 5 minutes
+            }));
+
+            // --- Original template effects (still stubbed in GameBridge) ---
 
             registry.Register(new Effect("confetti", "Confetti burst", ctx =>
             {
