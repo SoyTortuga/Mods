@@ -170,9 +170,8 @@ namespace MoonSweepersTwitch.Game
         /// look comes from <c>regionStates</c> alone (1 = cleared by the player). Flipping it
         /// back to 0 with full dust makes the game treat it as dusty again; this was
         /// confirmed to render dusty after a save/reload. A sector that isn't loaded right
-        /// now rebuilds from this data when it next loads. One that's loaded near the player
-        /// may not redraw live yet, because the chunk mesh refresh still fails when called
-        /// directly. Host-local.
+        /// now rebuilds from this data when it next loads; one that's already loaded is
+        /// redrawn with <c>RestoreRenderingBindings</c>. Host-local.
         /// </summary>
         public static void RefillRandomSector(EffectContext ctx)
         {
@@ -212,9 +211,12 @@ namespace MoonSweepersTwitch.Game
 
             if (UncompleteRegion(d, id))
             {
+                // Redraw loaded ground live. The redraw lab found this world-level re-bind is
+                // what makes an already-loaded sector show its dust without a reload.
+                bool redrawn = Step("RestoreRenderingBindings", () => world.RestoreRenderingBindings());
                 Plugin.Log.LogInfo(
                     $"[GameBridge] Refill: re-dusted cleared sector {id}{where} " +
-                    $"({cleared.Count} were cleared). ({ctx.Describe()})");
+                    $"({cleared.Count} were cleared, redraw {(redrawn ? "ok" : "failed")}). ({ctx.Describe()})");
             }
         }
 
