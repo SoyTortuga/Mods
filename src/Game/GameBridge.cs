@@ -46,6 +46,11 @@ namespace MoonSweepersTwitch.Game
 
         private static readonly System.Random _rng = new System.Random();
 
+        // Capture-replay state for the dust-page re-dust experiment: a valid "full dust"
+        // page captured from an uncleaned chunk, to be replayed onto a cleared one.
+        private static List<(int page, byte[] bytes)>? _dustTemplate;
+        private static int _dustTemplateChunk = -1;
+
         /// <summary>True while the vehicle-breakdown window is active.</summary>
         public static bool VehiclesBroken => Time.realtimeSinceStartup < _vehiclesBrokenUntil;
 
@@ -128,18 +133,19 @@ namespace MoonSweepersTwitch.Game
         }
 
         /// <summary>
-        /// STEP 2 of the dust-page re-dust route: re-dust the chunk the player is on.
+        /// STEP 3 of the dust-page re-dust route: capture-and-replay (the decisive test).
         ///
-        /// The probe showed a chunk's cleaning is carried in a crew dust page (chunk 163
-        /// used page 254, 1014 bytes) and that <c>ApplyCrewDustPage</c> runs on a live
-        /// chunk without crashing. A crew dust page is how the host tells crew what has
-        /// been CLEANED, so an empty (all-zero) page should mean "nothing cleaned here" —
-        /// i.e. full dust. This finds the player's loaded chunk, locates its non-empty
-        /// page(s), and applies a zeroed page of the same length to each, logging the
-        /// remaining-dust reading before/after. If dust comes back, step 3 generalises
-        /// this to a random cleared sector; if not, the logged page bytes tell us the
-        /// real encoding. (If it looks wrong in-game, reloading the save undoes it —
-        /// nothing is written to disk.)
+        /// A dust page is a serialized stream, not a bitmask — applying a zeroed page
+        /// threw "Corrupted data ReadInternal", so a full-dust page can't be synthesized.
+        /// The only remaining route is to capture a REAL, valid page from an uncleaned
+        /// (dusty) chunk and replay it onto a cleared chunk. This is a two-press probe on
+        /// one hotkey:
+        ///   1st press, standing on DUSTY ground  -> captures that chunk's page(s).
+        ///   2nd press, standing on CLEARED ground -> applies the captured page(s) here
+        ///                                            and logs remaining-dust before/after.
+        /// If the cleared ground re-dusts, the route works and we generalise it to a
+        /// random sector. If apply throws "Corrupted data", the page index/payload is
+        /// chunk-specific and cross-chunk replay is a dead end. Nothing is saved to disk.
         /// </summary>
         public static void RefillRandomSector(EffectContext ctx)
         {
@@ -158,7 +164,6 @@ namespace MoonSweepersTwitch.Game
                 return;
             }
 
-            // Direction from the moon centre (origin) to the player = the chunk under them.
             Vector3 dir = walker.transform.position.normalized;
             var chunk = world.ChunkAt(dir, out Vector2 _local);
             if (chunk == null)
@@ -168,9 +173,10 @@ namespace MoonSweepersTwitch.Game
             }
 
             int chunkId = world.ChunkId(chunk);
-            float before = world.RemainingAt(dir);
+            float here = world.RemainingAt(dir);
 
-            int zeroed = 0;
+            // Collect this chunk's non-empty pages (copied to managed byte[] for storage).
+            var pages = new List<(int page, byte[] bytes)>();
             for (int page = 0; page < 256; page++)
             {
                 Il2CppStructArray<byte> packed;
@@ -183,24 +189,51 @@ namespace MoonSweepersTwitch.Game
                 }
                 if (!ok || packed == null || packed.Length == 0) continue;
 
-                int len = packed.Length;
-                var head = new System.Text.StringBuilder();
-                for (int b = 0; b < Math.Min(24, len); b++) head.Append(packed[b].ToString("X2"));
-                Plugin.Log.LogInfo($"[GameBridge] Refill: chunk {chunkId} page {page} len={len} head={head}");
-
-                // Apply an all-zero page of the same length -> "nothing cleaned" -> full dust.
-                var zeros = new Il2CppStructArray<byte>(len);
-                try { world.ApplyCrewDustPage(chunkId, page, zeros); zeroed++; }
-                catch (Exception ex)
-                {
-                    Plugin.Log.LogError($"[GameBridge] Refill: ApplyCrewDustPage(page {page}) threw: {ex.Message}");
-                }
+                var managed = new byte[packed.Length];
+                for (int b = 0; b < packed.Length; b++) managed[b] = packed[b];
+                pages.Add((page, managed));
             }
 
+            if (_dustTemplate == null)
+            {
+                // Capture phase: we need a dusty chunk to grab a valid "full dust" page.
+                if (here <= 0.01f || pages.Count == 0)
+                {
+                    Plugin.Log.LogInfo(
+                        $"[GameBridge] Refill(capture): stand on DUSTY, uncleaned ground first " +
+                        $"(chunk {chunkId}, remaining={here:0.###}, pages={pages.Count}).");
+                    return;
+                }
+                _dustTemplate = pages;
+                _dustTemplateChunk = chunkId;
+                Plugin.Log.LogInfo(
+                    $"[GameBridge] Refill(capture): stored {pages.Count} page(s) from dusty chunk " +
+                    $"{chunkId} (remaining={here:0.###}). Now go to CLEARED ground and press again.");
+                return;
+            }
+
+            // Replay phase: apply the captured dusty page(s) onto THIS chunk.
+            float before = here;
+            int applied = 0;
+            foreach (var (page, bytes) in _dustTemplate)
+            {
+                try
+                {
+                    world.ApplyCrewDustPage(chunkId, page, new Il2CppStructArray<byte>(bytes));
+                    applied++;
+                }
+                catch (Exception ex)
+                {
+                    Plugin.Log.LogError($"[GameBridge] Refill(replay): ApplyCrewDustPage(page {page}) threw: {ex.Message}");
+                }
+            }
             float after = world.RemainingAt(dir);
             Plugin.Log.LogInfo(
-                $"[GameBridge] Refill: chunk {chunkId}, zeroed {zeroed} page(s), " +
-                $"remaining {before:0.###} -> {after:0.###}. ({ctx.Describe()})");
+                $"[GameBridge] Refill(replay): applied {applied}/{_dustTemplate.Count} page(s) from chunk " +
+                $"{_dustTemplateChunk} onto chunk {chunkId}, remaining {before:0.###} -> {after:0.###}. ({ctx.Describe()})");
+
+            _dustTemplate = null; // reset so the next press captures afresh
+            _dustTemplateChunk = -1;
         }
 
         /// <summary>
