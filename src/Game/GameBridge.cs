@@ -128,18 +128,21 @@ namespace MoonSweepersTwitch.Game
         }
 
         /// <summary>
-        /// Live-mask re-dust probe: clear the cleaning mask of the chunk the player is on.
+        /// Live-mask re-dust probe: paint dust back into a small circle around the player.
         ///
         /// Each loaded chunk holds its authoritative cleaning in <c>chunk.cleaning</c>
-        /// (a <see cref="MoonCleanMask"/>). The mask stores only cleaned pages — a missing
-        /// page means untouched, full dust (which is why untouched chunks save no data).
-        /// So removing every page and re-uploading should put the dust back. The player's
-        /// own chunk is used because it is guaranteed to be loaded (the earlier crash
-        /// came from an unloaded chunk). Each refresh step is guarded and logged
-        /// separately, and the dust reading is sampled before/after both through the
-        /// world (<c>RemainingAt</c>) and straight from the mask (<c>Sample</c>).
-        /// This re-dusts the WHOLE chunk under the player, not one sector — narrowing it
-        /// to a sector comes after the basic mechanism is proven.
+        /// (a <see cref="MoonCleanMask"/>). Removing pages outright worked but left the
+        /// game's mesh rebuild pointing at missing pages (NullReferenceException in
+        /// RefreshCleanedMesh), and rebuilding collision after that dropped the player
+        /// through the ground. This version uses <c>MoonCleanMask.Paint</c>, the painter
+        /// cleaning itself goes through, to write the "untouched" value back, so the
+        /// pages stay intact and the game's own change tracking sees the edit.
+        ///
+        /// Safety: the "untouched" byte is derived from the mask's own blank-page checksum
+        /// and the probe aborts if that doesn't resolve cleanly or if the player is already
+        /// on untouched ground. Only a small circle (radius 0.03 of the chunk) is painted,
+        /// and the refresh chain stops at the first failing step, so collision is never
+        /// rebuilt from a half-built mesh.
         /// </summary>
         public static void RefillRandomSector(EffectContext ctx)
         {
@@ -174,50 +177,112 @@ namespace MoonSweepersTwitch.Game
                 return;
             }
 
+            // 1) Read the mask's constants and work out which byte means "untouched".
+            int res = MoonCleanMask.Resolution;
+            int pageSize = MoonCleanMask.PageSize;
+            int pageQuads = MoonCleanMask.PageQuads;
+            ulong blankField = MoonCleanMask.BlankSum;
+            ulong blankSum = blankField;
+            try { blankSum = MoonCleanMask.BlankPageSum(); }
+            catch (Exception ex) { Plugin.Log.LogWarning("[GameBridge] Refill: BlankPageSum threw: " + ex.Message); }
+
+            int cx = Mathf.Clamp((int)(_local.x * res), 0, res - 1);
+            int cy = Mathf.Clamp((int)(_local.y * res), 0, res - 1);
+            int rawHere = -1;
+            try { rawHere = mask.RawGrid(cx, cy); }
+            catch (Exception ex) { Plugin.Log.LogWarning("[GameBridge] Refill: RawGrid threw: " + ex.Message); }
+
             float worldBefore = world.RemainingAt(dir);
             float maskBefore = SafeSample(mask, _local);
-
-            // Copy the keys out first: the interop List has no indexer, and we're about
-            // to remove the very pages it lists.
-            var keyList = new Il2CppSystem.Collections.Generic.List<int>();
-            mask.PageKeys(keyList);
-            var keyArr = keyList.ToArray();
-            int pageCount = keyArr.Length;
-            var keys = new int[pageCount];
-            for (int i = 0; i < pageCount; i++) keys[i] = keyArr[i];
-
-            var keyText = new System.Text.StringBuilder();
-            for (int i = 0; i < pageCount && i < 32; i++) keyText.Append(keys[i]).Append(' ');
             Plugin.Log.LogInfo(
-                $"[GameBridge] Refill: chunk {chunkId} local=({_local.x:0.###},{_local.y:0.###}), " +
-                $"{pageCount} cleaned page(s): {keyText}");
+                $"[GameBridge] Refill: chunk {chunkId} local=({_local.x:0.####},{_local.y:0.####}) " +
+                $"res={res} pageSize={pageSize} pageQuads={pageQuads} blankSum={blankSum} (field {blankField}) " +
+                $"pages={mask.PageCount} raw@({cx},{cy})={rawHere} sample={maskBefore:0.###} remaining={worldBefore:0.###}");
 
-            // Removing a page = that patch becomes untouched = full dust.
-            int removed = 0;
-            for (int i = 0; i < pageCount; i++)
+            if (!TryBlankValue(blankSum, pageSize, pageQuads, out byte blank))
             {
-                try { mask.RemovePage(keys[i]); removed++; }
-                catch (Exception ex)
-                {
-                    Plugin.Log.LogError($"[GameBridge] Refill: RemovePage({keys[i]}) threw: {ex.Message}");
-                    break;
-                }
+                Plugin.Log.LogWarning("[GameBridge] Refill: couldn't derive the untouched byte value from blankSum; aborting before any write.");
+                return;
+            }
+            if (rawHere == blank)
+            {
+                Plugin.Log.LogInfo($"[GameBridge] Refill: the ground here is already untouched (raw={rawHere}); stand on cleaned ground. No write.");
+                return;
             }
 
-            // Push the change through the same refresh chain cleaning uses. Each step is
-            // guarded on its own so one failure doesn't hide whether the others worked.
-            Step("mask.Upload", () => mask.Upload());
-            Step("UploadCleaning", () => world.UploadCleaning(chunk));
-            Step("RefreshCleanedMesh", () => world.RefreshCleanedMesh(chunk, true, new Rect(0f, 0f, 1f, 1f)));
-            Step("QueueCleaningCollision", () => world.QueueCleaningCollision(chunk));
-            Step("UpdateCleaningCollisions", () => world.UpdateCleaningCollisions());
+            // 2) Paint a small circle around the player back to the untouched value.
+            const float radius = 0.03f;
+            Vector2 centre = _local;
+            float x0 = Mathf.Max(0f, centre.x - radius), y0 = Mathf.Max(0f, centre.y - radius);
+            float x1 = Mathf.Min(1f, centre.x + radius), y1 = Mathf.Min(1f, centre.y + radius);
+            var bounds = new Rect(x0, y0, x1 - x0, y1 - y0);
+
+            Func<Vector2, byte, byte> fill = (uv, cur) =>
+                (uv - centre).sqrMagnitude <= radius * radius ? blank : cur;
+
+            int painted;
+            try
+            {
+                painted = mask.Paint(bounds, DelegateSupport.ConvertDelegate<Il2CppSystem.Func<Vector2, byte, byte>>(fill), null);
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogError($"[GameBridge] Refill: Paint threw: {ex.Message}. Nothing refreshed.");
+                return;
+            }
+
+            int rawPainted = -1;
+            try { rawPainted = mask.RawGrid(cx, cy); } catch { }
+            Plugin.Log.LogInfo(
+                $"[GameBridge] Refill: Paint(blank={blank}) changed {painted} texel(s); raw@centre {rawHere} -> {rawPainted}.");
+            if (painted <= 0)
+            {
+                Plugin.Log.LogWarning("[GameBridge] Refill: Paint changed nothing (it may only allow cleaning). Nothing refreshed.");
+                return;
+            }
+
+            // 3) Refresh, stopping at the first failure so collision is never rebuilt from a
+            //    half-built mesh.
+            bool ok = Step("mask.Upload", () => mask.Upload())
+                && Step("UploadCleaning", () => world.UploadCleaning(chunk))
+                && Step("RefreshCleanedMesh", () => world.RefreshCleanedMesh(chunk, true, bounds))
+                && Step("QueueCleaningCollision", () => world.QueueCleaningCollision(chunk))
+                && Step("UpdateCleaningCollisions", () => world.UpdateCleaningCollisions());
 
             float worldAfter = world.RemainingAt(dir);
             float maskAfter = SafeSample(mask, _local);
             Plugin.Log.LogInfo(
-                $"[GameBridge] Refill: chunk {chunkId}, removed {removed}/{pageCount} page(s), " +
+                $"[GameBridge] Refill: chunk {chunkId}, refresh {(ok ? "completed" : "STOPPED at failure")}, " +
                 $"RemainingAt {worldBefore:0.###} -> {worldAfter:0.###}, " +
                 $"mask.Sample {maskBefore:0.###} -> {maskAfter:0.###}. ({ctx.Describe()})");
+        }
+
+        /// <summary>
+        /// Work out the per-texel byte of an untouched page from the blank-page checksum.
+        /// A zero sum means untouched texels are 0; otherwise the sum must divide evenly by
+        /// one of the plausible texel counts per page into a value that fits a byte.
+        /// </summary>
+        private static bool TryBlankValue(ulong blankSum, int pageSize, int pageQuads, out byte blank)
+        {
+            blank = 0;
+            if (blankSum == 0) return true;
+
+            long[] counts =
+            {
+                (long)pageSize * pageSize, (long)(pageSize + 1) * (pageSize + 1),
+                (long)pageQuads * pageQuads, (long)(pageQuads + 1) * (pageQuads + 1),
+            };
+            foreach (long n in counts)
+            {
+                if (n <= 0) continue;
+                ulong un = (ulong)n;
+                if (blankSum % un == 0 && blankSum / un <= 255)
+                {
+                    blank = (byte)(blankSum / un);
+                    return true;
+                }
+            }
+            return false;
         }
 
         private static float SafeSample(MoonCleanMask mask, Vector2 uv)
@@ -230,16 +295,18 @@ namespace MoonSweepersTwitch.Game
             }
         }
 
-        private static void Step(string label, Action action)
+        private static bool Step(string label, Action action)
         {
             try
             {
                 action();
                 Plugin.Log.LogInfo($"[GameBridge] Refill: {label} ok.");
+                return true;
             }
             catch (Exception ex)
             {
                 Plugin.Log.LogError($"[GameBridge] Refill: {label} threw: {ex.Message}");
+                return false;
             }
         }
 
