@@ -258,28 +258,40 @@ namespace MoonSweepersTwitch.Game
         }
 
         /// <summary>
-        /// Work out the per-texel byte of an untouched page from the blank-page checksum.
-        /// A zero sum means untouched texels are 0; otherwise the sum must divide evenly by
-        /// one of the plausible texel counts per page into a value that fits a byte.
+        /// Work out the per-texel byte of an untouched page. <c>BlankSum</c> is a hash, not
+        /// an arithmetic sum, so the value can't be divided out of it. Instead, build a
+        /// page filled with a candidate value, hash it with the game's own
+        /// <c>MoonCleanMask.Sum</c>, and accept the candidate only if it reproduces
+        /// <c>BlankSum</c> exactly. Candidates are 0 and 255 at each plausible page size.
         /// </summary>
         private static bool TryBlankValue(ulong blankSum, int pageSize, int pageQuads, out byte blank)
         {
             blank = 0;
-            if (blankSum == 0) return true;
-
-            long[] counts =
+            int[] sides = { pageSize, pageQuads, pageSize + 1, pageQuads + 1 };
+            byte[] values = { 0, 255 };
+            foreach (int side in sides)
             {
-                (long)pageSize * pageSize, (long)(pageSize + 1) * (pageSize + 1),
-                (long)pageQuads * pageQuads, (long)(pageQuads + 1) * (pageQuads + 1),
-            };
-            foreach (long n in counts)
-            {
-                if (n <= 0) continue;
-                ulong un = (ulong)n;
-                if (blankSum % un == 0 && blankSum / un <= 255)
+                if (side <= 0) continue;
+                int n = side * side;
+                foreach (byte v in values)
                 {
-                    blank = (byte)(blankSum / un);
-                    return true;
+                    var managed = new byte[n];
+                    if (v != 0) for (int i = 0; i < n; i++) managed[i] = v;
+
+                    ulong hash;
+                    try { hash = MoonCleanMask.Sum(new Il2CppStructArray<byte>(managed)); }
+                    catch (Exception ex)
+                    {
+                        Plugin.Log.LogWarning($"[GameBridge] Refill: Sum({side}x{side} of {v}) threw: {ex.Message}");
+                        continue;
+                    }
+
+                    Plugin.Log.LogInfo($"[GameBridge] Refill: Sum({side}x{side} of {v}) = {hash}{(hash == blankSum ? "  <-- matches BlankSum" : "")}");
+                    if (hash == blankSum)
+                    {
+                        blank = v;
+                        return true;
+                    }
                 }
             }
             return false;
