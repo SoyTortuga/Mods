@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using MoonSweepersTwitch.Config;
 using MoonSweepersTwitch.Game;
 using UnityEngine;
@@ -23,11 +24,37 @@ namespace MoonSweepersTwitch.Util
         // Required constructor for IL2CPP-injected MonoBehaviours.
         public ModBehaviour(IntPtr ptr) : base(ptr) { }
 
+        // Parsed from the TestHotkeys config ("F1=joonasoff || F2=bankrupt").
+        private readonly List<(KeyCode key, string effect)> _extraHotkeys = new List<(KeyCode key, string effect)>();
+
         public void Initialize(PluginConfig config, EffectRegistry effects)
         {
             _config = config;
             _effects = effects;
             OnScreenMessages.Enabled = config.ShowOnScreenFeedback.Value;
+            ParseExtraHotkeys(config.TestHotkeys.Value);
+        }
+
+        private void ParseExtraHotkeys(string spec)
+        {
+            _extraHotkeys.Clear();
+            if (string.IsNullOrWhiteSpace(spec)) return;
+
+            foreach (var pair in spec.Split(new[] { "||" }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var parts = pair.Split(new[] { '=' }, 2);
+                if (parts.Length == 2 &&
+                    Enum.TryParse(parts[0].Trim(), ignoreCase: true, out KeyCode key) &&
+                    key != KeyCode.None && parts[1].Trim().Length > 0)
+                {
+                    _extraHotkeys.Add((key, parts[1].Trim()));
+                }
+                else
+                {
+                    Plugin.Log.LogWarning($"TestHotkeys: couldn't read '{pair.Trim()}' (expected Key=effectKey).");
+                }
+            }
+            Plugin.Log.LogInfo($"TestHotkeys: {_extraHotkeys.Count} extra test hotkey(s) loaded.");
         }
 
         private void Update()
@@ -53,6 +80,8 @@ namespace MoonSweepersTwitch.Util
 
                 PollOne(keyboard, _config!.TestEffectKey.Value, _config.TestEffectKeyName.Value);
                 PollOne(keyboard, _config.TestEffectKey2.Value, _config.TestEffectKey2Name.Value);
+                foreach (var (key, effect) in _extraHotkeys)
+                    PollOne(keyboard, key, effect);
             }
             catch (Exception ex)
             {

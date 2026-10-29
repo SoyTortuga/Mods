@@ -16,7 +16,7 @@ The whole **Twitch side is complete and working**: OAuth, token refresh, EventSu
 connection with auto-reconnect, channel-point and bits subscriptions, and routing
 events to named effects via your config.
 
-Four **chat sabotage effects are implemented** against the real game code (host-local,
+The **chat sabotage effects below are implemented** against the real game code (host-local,
 tested in-game):
 
 | Key | What it does |
@@ -25,6 +25,20 @@ tested in-game):
 | `toothbrush` | Swaps the toothbrush into the brush slot and locks the toolbelt to it for 5 minutes, then gives the original brush back. If the game closes mid-effect, the brush is restored on the next load. |
 | `emptydust` | Drops all held moon dust on the ground as 1 kg canisters (5 kg held = 5 canisters). |
 | `refilldust` | Re-dusts a random sector the streamer has fully cleared, live, keeping its hex shape. |
+| `joonasoff` | Switches off every J.O.O.N.A.S.; someone has to go and switch it back on. |
+| `roombaoff` | Switches off every MK1/MK2 robot vacuum, which heads back to its dock. |
+| `bankrupt` | Drains the team's shared money to zero. |
+| `gravity2x` / `gravity4x` / `gravity8x` | For 15 minutes, gravity is 2/4/8x stronger and run speed and jump height are 1/2, 1/4 or 1/8. A stronger level takes over and restarts the timer. |
+| `lightsout` | Keeps the helmet lamp switched off for 15 minutes. |
+| `tunnelvision` / `fisheye` | Field of view 30° / 140° for 15 minutes (one replaces the other). |
+| `potato` | Renders at a quarter resolution for 15 minutes. |
+| `paycut` | Half pay per kg and per section for 30 minutes. |
+| `tinypockets` | Dust carrying capacity cut to a quarter for 15 minutes. |
+| `butterfingers` | Canister pickup reach halved for 10 minutes. |
+| `endall` | Ends every timed effect immediately. |
+
+Robots and money are shared world state, so those effects hit the whole crew. The
+timed effects change the streamer's own game, so they affect only the streamer.
 
 The remaining template effects (`confetti`, `fog`, `dropdust`, `earthquake`,
 `speedboost`, `slowmo`, `payout`) are still stubs that only log; to make one real,
@@ -139,7 +153,7 @@ BitMappings = 1=>confetti || 100=>fog || 1000=>earthquake
 - Channel Point rewards match by **title** (case-insensitive). To match by the reward's
   stable id instead, use `id:<reward-id>=>effectKey`. Turn on `DebugLogging` to print
   titles and ids when you redeem.
-- Built-in effect keys: `breakdown`, `toothbrush`, `emptydust`, `refilldust` (working),
+- Built-in effect keys: see the table above (working),
   plus the stubbed `confetti`, `fog`, `dropdust`, `earthquake`, `speedboost`, `slowmo`,
   `payout`.
 

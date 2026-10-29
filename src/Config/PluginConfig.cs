@@ -23,6 +23,7 @@ namespace MoonSweepersTwitch.Config
         public readonly ConfigEntry<string> TestEffectKeyName;
         public readonly ConfigEntry<KeyCode> TestEffectKey2;
         public readonly ConfigEntry<string> TestEffectKey2Name;
+        public readonly ConfigEntry<string> TestHotkeys;
 
         public PluginConfig(ConfigFile config)
         {
@@ -85,6 +86,12 @@ namespace MoonSweepersTwitch.Config
             TestEffectKey2Name = config.Bind(
                 "General", "TestEffectKey2Effect", "refilldust",
                 "Effect key the second test hotkey fires.");
+
+            TestHotkeys = config.Bind(
+                "General", "TestHotkeys", "",
+                "More test hotkeys, for trying many effects in one session. Pairs separated by '||', " +
+                "each 'Key=effectKey', using Unity KeyCode names (e.g. F1=joonasoff || F2=bankrupt || Insert=endall). " +
+                "Leave empty to disable. Available effect keys: " + Effects.EffectKeyList + ".");
         }
     }
 }

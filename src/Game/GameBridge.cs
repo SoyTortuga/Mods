@@ -327,6 +327,77 @@ namespace MoonSweepersTwitch.Game
             Plugin.Log.LogInfo($"[GameBridge] Dropped {dropped} dust canister(s) ({ctx.Describe()}).");
         }
 
+        // =====================================================================
+        //  Robots and money (instant; shared world state the host controls)
+        // =====================================================================
+
+        /// <summary>
+        /// Switch off every robot of the given kinds, the same way a player does at the
+        /// robot's menu. The players have to go and switch each one back on.
+        /// <c>MoonWorld.MapRobots</c> lists every robot (loaded or not) with its dock, kind
+        /// (MkI / MkII / Joonas) and on/off state; <c>SetRobotOn(dock, false)</c> is the
+        /// game's own switch, which it also syncs to co-op crew.
+        /// </summary>
+        public static void RobotsOff(EffectContext ctx, string label, params MoonWorld.MapRobotKind[] kinds)
+        {
+            var world = FindFirst<MoonDustInventory>()?.World ?? FindFirst<MoonWorld>();
+            if (world == null)
+            {
+                Plugin.Log.LogInfo($"[GameBridge] {label}: no MoonWorld (not in-game?). ({ctx.Describe()})");
+                return;
+            }
+
+            var list = new Il2CppSystem.Collections.Generic.List<MoonWorld.MapRobot>();
+            world.MapRobots(list);
+            var robots = list.ToArray();
+
+            int total = 0, switchedOff = 0, alreadyOff = 0;
+            for (int i = 0; i < robots.Length; i++)
+            {
+                var r = robots[i];
+                if (r == null || Array.IndexOf(kinds, r.kind) < 0) continue;
+                total++;
+                if (!r.on) { alreadyOff++; continue; }
+
+                int dock = r.dock;
+                if (Step($"{label}: SetRobotOn({dock}, false) [{r.kind} #{r.number}]", () => world.SetRobotOn(dock, false)))
+                    switchedOff++;
+            }
+
+            Plugin.Log.LogInfo(
+                $"[GameBridge] {label}: switched off {switchedOff} of {total} robot(s) " +
+                $"({alreadyOff} were already off). ({ctx.Describe()})");
+        }
+
+        /// <summary>
+        /// Drain the team's shared money to zero, through the game's own purchase charge so
+        /// the save, co-op sync and money display all update normally.
+        /// </summary>
+        public static void Bankrupt(EffectContext ctx)
+        {
+            var inv = FindFirst<MoonDustInventory>();
+            var world = inv?.World;
+            string? player = inv?.playerId;
+            if (world == null || string.IsNullOrEmpty(player))
+            {
+                Plugin.Log.LogInfo($"[GameBridge] Bankrupt: world/player unavailable (not in-game?). ({ctx.Describe()})");
+                return;
+            }
+
+            var before = world.WalletDollars(player);
+            double beforeDollars = Il2CppSystem.Decimal.ToDouble(before);
+            if (beforeDollars <= 0.0)
+            {
+                Plugin.Log.LogInfo($"[GameBridge] Bankrupt: the wallet is already empty. ({ctx.Describe()})");
+                return;
+            }
+
+            Step("Bankrupt: ChargeBuild", () => world.ChargeBuild(player, before));
+            double afterDollars = Il2CppSystem.Decimal.ToDouble(world.WalletDollars(player));
+            Plugin.Log.LogInfo(
+                $"[GameBridge] Bankrupt: wallet ${beforeDollars:0.##} -> ${afterDollars:0.##}. ({ctx.Describe()})");
+        }
+
         /// <summary>The game's per-sector arrays, read once per effect.</summary>
         private sealed class RegionData
         {
@@ -413,7 +484,7 @@ namespace MoonSweepersTwitch.Game
             {
                 // Redraw loaded ground live. The redraw lab found this world-level re-bind is
                 // what makes an already-loaded sector show its dust without a reload.
-                bool redrawn = Step("RestoreRenderingBindings", () => world.RestoreRenderingBindings());
+                bool redrawn = Step("Refill: RestoreRenderingBindings", () => world.RestoreRenderingBindings());
                 Plugin.Log.LogInfo(
                     $"[GameBridge] Refill: re-dusted cleared sector {id}{where} " +
                     $"({cleared.Count} were cleared, redraw {(redrawn ? "ok" : "failed")}). ({ctx.Describe()})");
@@ -482,7 +553,7 @@ namespace MoonSweepersTwitch.Game
             try { world.CompletedRegionCount = Math.Max(0, world.CompletedRegionCount - 1); }
             catch (Exception ex) { Plugin.Log.LogWarning("[GameBridge] Uncomplete: setting CompletedRegionCount threw: " + ex.Message); }
 
-            bool ok = Step("UpdateProgress", () => world.UpdateProgress());
+            bool ok = Step("Refill: UpdateProgress", () => world.UpdateProgress());
             Plugin.Log.LogInfo(
                 $"[GameBridge] Uncomplete: region {id} -> state={d.States[id]} remaining={d.Remaining[id]:0.###} " +
                 $"complete={SafeBool(() => world.IsRegionComplete(id))} " +
@@ -506,12 +577,12 @@ namespace MoonSweepersTwitch.Game
             try
             {
                 action();
-                Plugin.Log.LogInfo($"[GameBridge] Refill: {label} ok.");
+                Plugin.Log.LogInfo($"[GameBridge] {label} ok.");
                 return true;
             }
             catch (Exception ex)
             {
-                Plugin.Log.LogError($"[GameBridge] Refill: {label} threw: {ex.Message}");
+                Plugin.Log.LogError($"[GameBridge] {label} threw: {ex.Message}");
                 return false;
             }
         }
@@ -520,8 +591,22 @@ namespace MoonSweepersTwitch.Game
         /// Called every frame on the main thread. Enforces whichever timed effects are
         /// active and announces when each one ends. Never throws into the game loop.
         /// </summary>
+        /// <summary>
+        /// End every timed effect right now (breakdown, toothbrush, gravity, FOV, …). Each
+        /// restores its original values on the next tick.
+        /// </summary>
+        public static void EndAllTimed(EffectContext ctx)
+        {
+            _vehiclesBrokenUntil = 0f;
+            _toothbrushUntil = 0f;
+            TimedEffects.StopAll();
+            Plugin.Log.LogInfo($"[GameBridge] All timed effects ended. ({ctx.Describe()})");
+        }
+
         public static void Tick()
         {
+            TimedEffects.Tick();
+
             try
             {
                 bool broken = VehiclesBroken;
@@ -669,7 +754,7 @@ namespace MoonSweepersTwitch.Game
         private static float _walkerRetryAt;
 
         /// <summary>The local player's walker, taken from the local dust inventory.</summary>
-        private static MoonWalker? LocalWalker()
+        internal static MoonWalker? LocalWalker()
         {
             if (_walker == null && Time.realtimeSinceStartup >= _walkerRetryAt)
             {
@@ -747,7 +832,7 @@ namespace MoonSweepersTwitch.Game
         /// likely Unity 6 retains them, and use whichever one works. Each attempt is
         /// guarded because calling a stripped method throws.
         /// </summary>
-        private static T? FindFirst<T>() where T : Object
+        internal static T? FindFirst<T>() where T : Object
         {
             var type = Il2CppType.Of<T>();
 

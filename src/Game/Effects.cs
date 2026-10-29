@@ -13,7 +13,9 @@ namespace MoonSweepersTwitch.Game
     {
         /// <summary>Keys usable in RewardMappings / BitMappings, for config docs.</summary>
         public const string EffectKeyList =
-            "breakdown, toothbrush, emptydust, refilldust, confetti, fog, dropdust, earthquake, speedboost, slowmo, payout";
+            "breakdown, toothbrush, emptydust, refilldust, joonasoff, roombaoff, bankrupt, " +
+            "gravity2x, gravity4x, gravity8x, lightsout, tunnelvision, fisheye, potato, paycut, " +
+            "tinypockets, butterfingers, endall, confetti, fog, dropdust, earthquake, speedboost, slowmo, payout";
 
         public static void RegisterBuiltIns(EffectRegistry registry, PluginConfig config)
         {
@@ -47,6 +49,95 @@ namespace MoonSweepersTwitch.Game
             {
                 Feedback(ctx, "🌑 A sector gets dusty again!");
                 GameBridge.RefillRandomSector(ctx);
+            }));
+
+            // --- Robots and money (instant; shared world state) ---
+
+            registry.Register(new Effect("joonasoff", "J.O.O.N.A.S. breakdown", ctx =>
+            {
+                Feedback(ctx, "🤖 J.O.O.N.A.S. switched off!");
+                GameBridge.RobotsOff(ctx, "J.O.O.N.A.S. breakdown", MoonCleaners.MoonWorld.MapRobotKind.Joonas);
+            }));
+
+            registry.Register(new Effect("roombaoff", "Roomba breakdown", ctx =>
+            {
+                Feedback(ctx, "🧹 The robot vacuums went home!");
+                GameBridge.RobotsOff(ctx, "Roomba breakdown",
+                    MoonCleaners.MoonWorld.MapRobotKind.MkI, MoonCleaners.MoonWorld.MapRobotKind.MkII);
+            }));
+
+            registry.Register(new Effect("bankrupt", "Bankrupt", ctx =>
+            {
+                Feedback(ctx, "💸 Bankrupt!");
+                GameBridge.Bankrupt(ctx);
+            }));
+
+            // --- Timed effects (host-local: they change the streamer's own game) ---
+
+            registry.Register(new Effect("gravity2x", "2x gravity", ctx =>
+            {
+                Feedback(ctx, "🪐 2x gravity!");
+                TimedEffects.Gravity.StartLevel(2, seconds: 900f); // 15 minutes
+            }));
+
+            registry.Register(new Effect("gravity4x", "4x gravity", ctx =>
+            {
+                Feedback(ctx, "🪐 4x gravity!");
+                TimedEffects.Gravity.StartLevel(4, seconds: 900f);
+            }));
+
+            registry.Register(new Effect("gravity8x", "8x gravity", ctx =>
+            {
+                Feedback(ctx, "🪐 8x gravity!");
+                TimedEffects.Gravity.StartLevel(8, seconds: 900f);
+            }));
+
+            registry.Register(new Effect("lightsout", "Lights out", ctx =>
+            {
+                Feedback(ctx, "🔦 Lights out!");
+                TimedEffects.LightsOut.Start(seconds: 900f); // 15 minutes
+            }));
+
+            registry.Register(new Effect("tunnelvision", "Tunnel vision", ctx =>
+            {
+                Feedback(ctx, "🔭 Tunnel vision!");
+                TimedEffects.Fov.StartMode("Tunnel vision", fov: 30f, seconds: 900f);
+            }));
+
+            registry.Register(new Effect("fisheye", "Fisheye", ctx =>
+            {
+                Feedback(ctx, "🐟 Fisheye!");
+                TimedEffects.Fov.StartMode("Fisheye", fov: 140f, seconds: 900f);
+            }));
+
+            registry.Register(new Effect("potato", "Potato mode", ctx =>
+            {
+                Feedback(ctx, "🥔 Potato mode!");
+                TimedEffects.Potato.Start(seconds: 900f); // 15 minutes
+            }));
+
+            registry.Register(new Effect("paycut", "Paycut", ctx =>
+            {
+                Feedback(ctx, "📉 Paycut: half pay!");
+                TimedEffects.Paycut.Start(seconds: 1800f); // 30 minutes
+            }));
+
+            registry.Register(new Effect("tinypockets", "Tiny pockets", ctx =>
+            {
+                Feedback(ctx, "👖 Tiny pockets!");
+                TimedEffects.TinyPockets.Start(seconds: 900f); // 15 minutes
+            }));
+
+            registry.Register(new Effect("butterfingers", "Butterfingers", ctx =>
+            {
+                Feedback(ctx, "🧈 Butterfingers!");
+                TimedEffects.Butterfingers.Start(seconds: 600f); // 10 minutes
+            }));
+
+            registry.Register(new Effect("endall", "End all timed effects", ctx =>
+            {
+                Feedback(ctx, "✅ All effects ended.");
+                GameBridge.EndAllTimed(ctx);
             }));
 
             // --- Original template effects (still stubbed in GameBridge) ---

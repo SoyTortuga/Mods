@@ -85,6 +85,15 @@
       <HintPath>$(GameInteropDir)\UnityEngine.TextRenderingModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- URP: Potato Mode lowers the render pipeline asset's renderScale. -->
+    <Reference Include="Unity.RenderPipelines.Universal.Runtime">
+      <HintPath>$(GameInteropDir)\Unity.RenderPipelines.Universal.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.RenderPipelines.Core.Runtime">
+      <HintPath>$(GameInteropDir)\Unity.RenderPipelines.Core.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <!--
       The game's own code (MoonCleaners.*). Referenced so GameBridge can drive real
       game systems. Present at runtime (BepInEx generates it), so Private=false.
