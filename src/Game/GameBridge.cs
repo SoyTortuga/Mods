@@ -128,42 +128,100 @@ namespace MoonSweepersTwitch.Game
         }
 
         /// <summary>
-        /// Re-dust the moon via the game's own <c>MoonWorld.DevResetDust()</c>.
+        /// STEP 1 of the dust-page re-dust route: a safe probe, not the finished effect.
         ///
-        /// Why not a single sector: re-adding dust to one chunk means poking that chunk's
-        /// data and re-uploading it, but <c>MoonWorld.UploadCleaning</c> dereferences the
-        /// chunk's GPU/mesh bindings, which the streaming system only sets up for chunks
-        /// that are currently loaded. A random cleared sector is usually unloaded, so the
-        /// manual path throws a NullReferenceException inside the game
-        /// (MoonWorldCleaning.cs:278). <c>DevResetDust()</c> instead runs the game's own
-        /// full re-dust pipeline, so it handles rendering/streaming correctly — the
-        /// trade-off is it re-dusts the WHOLE moon, undoing all cleaning progress.
-        /// (It had never actually run before: the stripped <c>FindObjectOfType</c> threw
-        /// first. Now the lookup goes through <see cref="FindFirst{T}"/>.) Host-local.
+        /// Re-adding dust through the manual chunk path crashes (UploadCleaning needs
+        /// GPU bindings that only loaded chunks have) and the game's DevResetDust is
+        /// dev-gated. The remaining route is the networked dust-page API
+        /// (<c>WriteCrewDustPage</c> / <c>ApplyCrewDustPage</c>), which is how the game
+        /// syncs dust between host and crew. Before building a re-dust on it, we need to
+        /// know its shape, so this probe: finds the chunk the local player is standing
+        /// on (guaranteed loaded), reads out every dust page for it (logging the page
+        /// count, each page's byte length, and a hex preview of page 0), then re-applies
+        /// those same bytes (an identity round-trip — no visible change) to confirm
+        /// <c>ApplyCrewDustPage</c> runs on a live chunk without crashing. The log from
+        /// this tells us how to synthesize a "full dust" page in step 2.
         /// </summary>
         public static void RefillRandomSector(EffectContext ctx)
         {
-            var world = FindFirst<MoonWorld>();
+            var inv = FindFirst<MoonDustInventory>();
+            var world = inv?.World ?? FindFirst<MoonWorld>();
             if (world == null)
             {
-                Plugin.Log.LogInfo($"[GameBridge] Refill: no MoonWorld (not in-game?). ({ctx.Describe()})");
+                Plugin.Log.LogInfo($"[GameBridge] DustPageProbe: no MoonWorld (not in-game?). ({ctx.Describe()})");
                 return;
             }
 
-            try
+            var walker = inv?.walker;
+            if (walker == null)
             {
-                bool ok = world.DevResetDust();
-                Plugin.Log.LogInfo(
-                    $"[GameBridge] DevResetDust -> {ok} (whole-moon re-dust). ({ctx.Describe()})");
-                OnScreenMessages.Show(
-                    ok ? "🌑 The whole moon is dusty again!" : "⚠ DevResetDust returned false.", 5f);
+                Plugin.Log.LogWarning("[GameBridge] DustPageProbe: no local walker; can't locate the player's chunk.");
+                return;
             }
-            catch (Exception ex)
+
+            // Direction from the moon centre (origin) to the player = the chunk under them.
+            Vector3 dir = walker.transform.position.normalized;
+            var chunk = world.ChunkAt(dir, out Vector2 _local);
+            if (chunk == null)
             {
-                Plugin.Log.LogError(
-                    "[GameBridge] DevResetDust threw (stripped/unsupported on this build?): " + ex.Message);
-                OnScreenMessages.Show("⚠ Re-dust isn't available on this build.", 6f);
+                Plugin.Log.LogWarning("[GameBridge] DustPageProbe: ChunkAt returned null under the player.");
+                return;
             }
+
+            int chunkId = world.ChunkId(chunk);
+            Plugin.Log.LogInfo(
+                $"[GameBridge] DustPageProbe: chunkId={chunkId} (player's chunk, loaded). ({ctx.Describe()})");
+
+            // Read every page the game will give us for this chunk.
+            var pages = new List<(int page, Il2CppStructArray<byte> bytes)>();
+            for (int page = 0; page < 256; page++)
+            {
+                bool ok;
+                Il2CppStructArray<byte> packed;
+                try
+                {
+                    ok = world.WriteCrewDustPage(chunkId, page, out packed);
+                }
+                catch (Exception ex)
+                {
+                    Plugin.Log.LogWarning($"[GameBridge] DustPageProbe: WriteCrewDustPage(page {page}) threw: {ex.Message}");
+                    break;
+                }
+
+                if (!ok)
+                {
+                    Plugin.Log.LogInfo($"[GameBridge] DustPageProbe: page {page} -> false (end of pages).");
+                    break;
+                }
+
+                int len = (packed != null) ? packed.Length : -1;
+                string preview = "";
+                if (page == 0 && packed != null)
+                {
+                    int n = Math.Min(16, packed.Length);
+                    var sb = new System.Text.StringBuilder();
+                    for (int b = 0; b < n; b++) sb.Append(packed[b].ToString("X2"));
+                    preview = $" head={sb}";
+                }
+                Plugin.Log.LogInfo($"[GameBridge] DustPageProbe: page {page} len={len}{preview}");
+                if (packed != null) pages.Add((page, packed));
+            }
+
+            // Identity round-trip: apply the exact bytes back. No visible change, but it
+            // proves ApplyCrewDustPage works on a live, loaded chunk without crashing.
+            int applied = 0;
+            foreach (var (page, bytes) in pages)
+            {
+                try { world.ApplyCrewDustPage(chunkId, page, bytes); applied++; }
+                catch (Exception ex)
+                {
+                    Plugin.Log.LogError($"[GameBridge] DustPageProbe: ApplyCrewDustPage(page {page}) threw: {ex.Message}");
+                    break;
+                }
+            }
+
+            Plugin.Log.LogInfo(
+                $"[GameBridge] DustPageProbe: read {pages.Count} page(s), re-applied {applied} (identity) with no crash.");
         }
 
         /// <summary>

@@ -48,29 +48,11 @@ namespace MoonSweepersTwitch.Util
             // UnityEngine.Input API throws every frame. Read the keyboard device instead.
             try
             {
-                var code = _config!.TestEffectKey.Value;
-                if (code == KeyCode.None) return;
-
                 var keyboard = Keyboard.current;
                 if (keyboard == null) return;
 
-                var control = ResolveKeyControl(keyboard, code);
-                if (control == null)
-                {
-                    if (!_hotkeyWarned)
-                    {
-                        _hotkeyWarned = true;
-                        Plugin.Log.LogWarning(
-                            $"Test hotkey '{code}' isn't mapped to an Input System key; hotkey disabled.");
-                    }
-                    return;
-                }
-
-                if (control.wasPressedThisFrame)
-                {
-                    var effectKey = _config.TestEffectKeyName.Value;
-                    _effects!.Trigger(effectKey, EffectContext.Test(effectKey));
-                }
+                PollOne(keyboard, _config!.TestEffectKey.Value, _config.TestEffectKeyName.Value);
+                PollOne(keyboard, _config.TestEffectKey2.Value, _config.TestEffectKey2Name.Value);
             }
             catch (Exception ex)
             {
@@ -80,6 +62,26 @@ namespace MoonSweepersTwitch.Util
                     Plugin.Log.LogWarning("Test hotkey polling failed: " + ex.Message);
                 }
             }
+        }
+
+        private void PollOne(Keyboard keyboard, KeyCode code, string effectKey)
+        {
+            if (code == KeyCode.None || string.IsNullOrEmpty(effectKey)) return;
+
+            var control = ResolveKeyControl(keyboard, code);
+            if (control == null)
+            {
+                if (!_hotkeyWarned)
+                {
+                    _hotkeyWarned = true;
+                    Plugin.Log.LogWarning(
+                        $"Test hotkey '{code}' isn't mapped to an Input System key; hotkey disabled.");
+                }
+                return;
+            }
+
+            if (control.wasPressedThisFrame)
+                _effects!.Trigger(effectKey, EffectContext.Test(effectKey));
         }
 
         /// <summary>
