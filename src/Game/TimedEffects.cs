@@ -272,7 +272,19 @@ namespace MoonSweepersTwitch.Game
             Plugin.Log.LogInfo(
                 $"[Timed] Tiny pockets: carrying capacity {before:0.##} kg -> {after:0.##} kg " +
                 $"(base {_baseKg.Value:0.##} -> {_settings.inventoryCapacityKg:0.##}, {_containers.Count} container tool(s)).");
+
+            ShrinkVehicleStorage(world);
             return true;
+        }
+
+        protected override void Enforce()
+        {
+            // The game may raise a vehicle's capacity back (e.g. on upgrade); hold it down.
+            foreach (var (storage, capacity) in _storages)
+            {
+                double wanted = capacity * Factor;
+                if (storage != null && storage.capacity > wanted + 0.001) storage.capacity = wanted;
+            }
         }
 
         protected override void Revert()
@@ -280,10 +292,55 @@ namespace MoonSweepersTwitch.Game
             if (_settings != null && _baseKg.HasValue) _settings.inventoryCapacityKg = _baseKg.Value;
             foreach (var (tool, kg) in _containers)
                 if (tool != null) tool.containerKg = kg;
+            foreach (var (storage, capacity) in _storages)
+                if (storage != null) storage.capacity = capacity;
+            TimedEffects.DeleteVehicleRestoreNote();
+
             _settings = null;
             _baseKg = null;
             _containers.Clear();
             _containersCaptured = false;
+            _storages.Clear();
+            _storagesCaptured = false;
+        }
+
+        // Vehicle dust storage, with each entry's original capacity. Only the capacity
+        // changes, never the dust inside, so a vehicle already over the new limit keeps its
+        // dust but can't take more.
+        private readonly List<(MoonVehicleStorageSnapshot storage, double capacity)> _storages =
+            new List<(MoonVehicleStorageSnapshot storage, double capacity)>();
+        private bool _storagesCaptured;
+
+        private void ShrinkVehicleStorage(MoonWorld world)
+        {
+            if (!_storagesCaptured)
+            {
+                var all = world.vehicleStorage;
+                if (all != null)
+                {
+                    foreach (var entry in all)
+                    {
+                        var storage = entry.Value;
+                        if (storage == null || storage.capacity <= 0.0 || MoonWorld.RobotStorage(entry.Key)) continue;
+                        _storages.Add((storage, storage.capacity));
+                    }
+                }
+                _storagesCaptured = true;
+
+                // Vehicle storage is saved with the game, so note the originals first.
+                TimedEffects.WriteVehicleRestoreNote(_storages);
+            }
+
+            double before = 0, after = 0;
+            foreach (var (storage, capacity) in _storages)
+            {
+                if (storage == null) continue;
+                storage.capacity = capacity * Factor;
+                before += capacity;
+                after += storage.capacity;
+            }
+            Plugin.Log.LogInfo(
+                $"[Timed] Tiny pockets: {_storages.Count} vehicle storage(s), total capacity {before:0.##} kg -> {after:0.##} kg.");
         }
 
         /// <summary>
@@ -494,6 +551,9 @@ namespace MoonSweepersTwitch.Game
 
             if (!_fovRestoreChecked && !Fov.Active && Time.realtimeSinceStartup >= _fovRestoreRetryAt)
                 CheckPendingFovRestore();
+
+            if (!_vehicleRestoreChecked && !TinyPockets.Active && Time.realtimeSinceStartup >= _vehicleRestoreRetryAt)
+                CheckPendingVehicleRestore();
         }
 
         /// <summary>End every timed effect now; each restores its originals on the next tick.</summary>
@@ -505,6 +565,71 @@ namespace MoonSweepersTwitch.Game
         /// <summary>The game's tuning sheet (gravity, speeds, pay rates, capacities).</summary>
         internal static MoonSettings? Settings() =>
             GameBridge.FindFirst<MoonDustInventory>()?.World?.settings;
+
+        // ---- Vehicle capacity restore note (vehicle storage is saved with the game) ----
+
+        private static bool _vehicleRestoreChecked;
+        private static float _vehicleRestoreRetryAt;
+
+        private static string VehicleNotePath => System.IO.Path.Combine(
+            BepInEx.Paths.ConfigPath, "com.soytortuga.moonsweepers.twitch.vehicle-capacity-restore.txt");
+
+        internal static void WriteVehicleRestoreNote(List<(MoonVehicleStorageSnapshot storage, double capacity)> storages)
+        {
+            try
+            {
+                var lines = new List<string>();
+                foreach (var (storage, capacity) in storages)
+                    if (storage != null && !string.IsNullOrEmpty(storage.id))
+                        lines.Add(storage.id + "\t" + capacity.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+                System.IO.File.WriteAllLines(VehicleNotePath, lines);
+            }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Timed] Couldn't write the vehicle capacity restore note: " + ex.Message); }
+        }
+
+        internal static void DeleteVehicleRestoreNote()
+        {
+            try { if (System.IO.File.Exists(VehicleNotePath)) System.IO.File.Delete(VehicleNotePath); }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Timed] Couldn't delete the vehicle capacity restore note: " + ex.Message); }
+        }
+
+        /// <summary>Raise any vehicle left shrunk by a session that ended mid-effect back to its original capacity.</summary>
+        private static void CheckPendingVehicleRestore()
+        {
+            if (!System.IO.File.Exists(VehicleNotePath))
+            {
+                _vehicleRestoreChecked = true;
+                return;
+            }
+
+            _vehicleRestoreRetryAt = Time.realtimeSinceStartup + 5f;
+            var all = GameBridge.FindFirst<MoonDustInventory>()?.World?.vehicleStorage;
+            if (all == null) return; // no save loaded yet
+
+            int restored = 0;
+            try
+            {
+                foreach (var line in System.IO.File.ReadAllLines(VehicleNotePath))
+                {
+                    var parts = line.Split('\t');
+                    if (parts.Length != 2 || !double.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out double capacity)) continue;
+
+                    if (all.TryGetValue(parts[0], out var storage) && storage != null && storage.capacity < capacity - 0.001)
+                    {
+                        storage.capacity = capacity;
+                        restored++;
+                    }
+                }
+                Plugin.Log.LogInfo($"[Timed] Restored {restored} vehicle storage capacity(ies) left over from the last session.");
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning("[Timed] Vehicle capacity restore failed: " + ex.Message);
+            }
+            DeleteVehicleRestoreNote();
+            _vehicleRestoreChecked = true;
+        }
 
         // ---- FOV restore note (the FOV is a saved preference) ----
 

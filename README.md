@@ -33,7 +33,7 @@ four (`breakdown` to `refilldust`) are tested in-game; the rest are new and stil
 | `tunnelvision` / `fisheye` | Field of view 30° / 140° for 15 minutes (one replaces the other). |
 | `potato` | Renders at a quarter resolution for 15 minutes. |
 | `paycut` | Half pay per kg and per section for 30 minutes. |
-| `tinypockets` | Dust carrying capacity (base plus containers) cut to a quarter for 15 minutes. |
+| `tinypockets` | Dust carrying capacity (on foot and in vehicles) cut to a quarter for 15 minutes; dust already carried is kept. |
 | `butterfingers` | Canister pickup reach halved for 10 minutes. |
 | `endall` | Ends every timed effect immediately. |
 
