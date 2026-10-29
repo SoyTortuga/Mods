@@ -128,100 +128,42 @@ namespace MoonSweepersTwitch.Game
         }
 
         /// <summary>
-        /// Refill a random already-cleared hex sector with dust.
+        /// Re-dust the moon via the game's own <c>MoonWorld.DevResetDust()</c>.
         ///
-        /// The game has no additive dust API, so this writes the dust data directly:
-        /// it finds the chunk under the sector's centre (<see cref="MoonWorld.ChunkAt"/>),
-        /// refills that chunk's coarse per-cell "remaining" buffer to full, re-uploads
-        /// the texture/mesh/collision through the game's own cleaning-refresh methods
-        /// (which are NOT stripped — the game uses them while you clean), and resets the
-        /// region's aggregate remaining so progress + UI follow.
-        ///
-        /// Note: an earlier attempt looked like it did nothing, but that was the stripped
-        /// <c>FindObjectOfType</c> throwing before any of this ran. Now that the MoonWorld
-        /// lookup goes through <see cref="FindFirst{T}"/>, the before/after dust reading is
-        /// logged so we can see whether the write actually takes. Caveats: it re-dusts a
-        /// whole chunk (roughly a sector), it's host-local (not networked to crew), and it
-        /// may not survive a save/reload.
+        /// Why not a single sector: re-adding dust to one chunk means poking that chunk's
+        /// data and re-uploading it, but <c>MoonWorld.UploadCleaning</c> dereferences the
+        /// chunk's GPU/mesh bindings, which the streaming system only sets up for chunks
+        /// that are currently loaded. A random cleared sector is usually unloaded, so the
+        /// manual path throws a NullReferenceException inside the game
+        /// (MoonWorldCleaning.cs:278). <c>DevResetDust()</c> instead runs the game's own
+        /// full re-dust pipeline, so it handles rendering/streaming correctly — the
+        /// trade-off is it re-dusts the WHOLE moon, undoing all cleaning progress.
+        /// (It had never actually run before: the stripped <c>FindObjectOfType</c> threw
+        /// first. Now the lookup goes through <see cref="FindFirst{T}"/>.) Host-local.
         /// </summary>
         public static void RefillRandomSector(EffectContext ctx)
         {
             var world = FindFirst<MoonWorld>();
             if (world == null)
             {
-                Plugin.Log.LogInfo($"[GameBridge] RefillSector: no MoonWorld (not in-game?). ({ctx.Describe()})");
+                Plugin.Log.LogInfo($"[GameBridge] Refill: no MoonWorld (not in-game?). ({ctx.Describe()})");
                 return;
             }
 
-            var regions = world.Regions;
-            int count = (regions != null) ? regions.Count : 0;
-            if (regions == null || count <= 0)
+            try
             {
-                Plugin.Log.LogWarning("[GameBridge] RefillSector: no regions available.");
-                return;
+                bool ok = world.DevResetDust();
+                Plugin.Log.LogInfo(
+                    $"[GameBridge] DevResetDust -> {ok} (whole-moon re-dust). ({ctx.Describe()})");
+                OnScreenMessages.Show(
+                    ok ? "🌑 The whole moon is dusty again!" : "⚠ DevResetDust returned false.", 5f);
             }
-
-            // A sector is "cleared" when its remaining dust is ~0.
-            var cleared = new List<int>();
-            var remaining = world.regionRemaining;
-            if (remaining != null && remaining.Length >= count)
+            catch (Exception ex)
             {
-                for (int i = 0; i < count; i++)
-                    if (remaining[i] <= 0.01f) cleared.Add(i);
+                Plugin.Log.LogError(
+                    "[GameBridge] DevResetDust threw (stripped/unsupported on this build?): " + ex.Message);
+                OnScreenMessages.Show("⚠ Re-dust isn't available on this build.", 6f);
             }
-            else
-            {
-                for (int i = 0; i < count; i++)
-                    if (world.RemainingAt(regions.Centers[i].normalized) <= 0.01f) cleared.Add(i);
-            }
-
-            if (cleared.Count == 0)
-            {
-                Plugin.Log.LogInfo("[GameBridge] RefillSector: no cleared sectors to refill.");
-                OnScreenMessages.Show("✨ Nothing's clean enough to re-dust!", 5f);
-                return;
-            }
-
-            int id = cleared[_rng.Next(cleared.Count)];
-            Vector3 dir = regions.Centers[id].normalized;
-            float before = world.RemainingAt(dir);
-
-            var chunk = world.ChunkAt(dir, out Vector2 _local);
-            int cells = 0;
-            if (chunk != null)
-            {
-                var coarse = chunk.coarseRemaining;
-                if (coarse != null)
-                {
-                    for (int k = 0; k < coarse.Length; k++) coarse[k] = byte.MaxValue; // full dust
-                    cells = coarse.Length;
-                }
-                world.UploadCleaning(chunk);
-                world.RefreshCleanedMesh(chunk, true, new Rect(0f, 0f, 1f, 1f));
-                world.QueueCleaningCollision(chunk);
-                world.UpdateCleaningCollisions();
-            }
-
-            // Make the region read as un-cleaned again.
-            if (remaining != null && remaining.Length > id)
-            {
-                float init = world.RegionInitialDust(id);
-                remaining[id] = (init > 0f) ? init : 1f;
-            }
-            world.MarkRegionTouched(id);
-            world.QueueRegionCheck(id);
-
-            float after = world.RemainingAt(dir);
-            Plugin.Log.LogInfo(
-                $"[GameBridge] RefillSector region {id}: chunk={(chunk != null)}, coarseCells={cells}, " +
-                $"remaining {before:0.###} -> {after:0.###}. ({ctx.Describe()})");
-
-            if (chunk != null && cells > 0 && after > before + 0.001f)
-                OnScreenMessages.Show($"🌑 Sector {id} re-dusted!", 5f);
-            else if (chunk != null && cells > 0)
-                OnScreenMessages.Show($"⚠ Sector {id}: wrote dust data, but it didn't stick.", 6f);
-            else
-                OnScreenMessages.Show($"⚠ Sector {id}: couldn't reach the dust data.", 6f);
         }
 
         /// <summary>
