@@ -81,12 +81,17 @@ namespace MoonSweepersTwitch.Game
         protected abstract void Revert();
     }
 
-    /// <summary>2x / 4x / 8x gravity: falling is N times stronger, run speed and jump height 1/N.</summary>
+    /// <summary>2x / 4x / 8x gravity: falling is N times stronger; run speed, jump height and driven vehicles 1/N.</summary>
     internal sealed class GravityEffect : TimedEffect
     {
         private int _level = 1;
         private MoonSettings? _settings;
         private float? _gravity, _jumpHeight, _runSpeed;
+
+        // Vehicles driven while the effect runs, with their original SpeedFactor. They stay
+        // slowed until the effect ends, even after the player gets out.
+        private readonly List<(MoonPrototypeVehicle vehicle, float speedFactor)> _vehicles =
+            new List<(MoonPrototypeVehicle vehicle, float speedFactor)>();
 
         public override string Name => $"{_level}x gravity";
 
@@ -115,8 +120,11 @@ namespace MoonSweepersTwitch.Game
             _jumpHeight ??= _settings.jumpHeight;
             _runSpeed ??= _settings.runSpeed;
             Write();
+            SlowDrivenVehicle();
             return true;
         }
+
+        protected override void Enforce() => SlowDrivenVehicle();
 
         private void Write()
         {
@@ -127,6 +135,32 @@ namespace MoonSweepersTwitch.Game
             Plugin.Log.LogInfo(
                 $"[Timed] {_level}x gravity: gravity {_gravity!.Value:0.###} -> {s.gravity:0.###}, " +
                 $"jumpHeight {_jumpHeight!.Value:0.###} -> {s.jumpHeight:0.###}, runSpeed {_runSpeed!.Value:0.###} -> {s.runSpeed:0.###}.");
+
+            // A level change also re-slows every vehicle already affected.
+            foreach (var (vehicle, factor) in _vehicles)
+                if (vehicle != null) vehicle.SpeedFactor = factor / _level;
+        }
+
+        /// <summary>Slow the vehicle the local player is driving to 1/N of its own speed factor.</summary>
+        private void SlowDrivenVehicle()
+        {
+            var walker = GameBridge.LocalWalker();
+            var vehicle = walker != null && walker.Mounted ? walker.mountedVehicle : null;
+            if (vehicle == null) return;
+
+            int index = -1;
+            for (int i = 0; i < _vehicles.Count; i++)
+                if (_vehicles[i].vehicle != null && _vehicles[i].vehicle.Pointer == vehicle.Pointer) { index = i; break; }
+            if (index < 0)
+            {
+                _vehicles.Add((vehicle, vehicle.SpeedFactor));
+                index = _vehicles.Count - 1;
+                Plugin.Log.LogInfo(
+                    $"[Timed] {_level}x gravity: vehicle speed factor {vehicle.SpeedFactor:0.###} -> {vehicle.SpeedFactor / _level:0.###}.");
+            }
+
+            float wanted = _vehicles[index].speedFactor / _level;
+            if (Mathf.Abs(vehicle.SpeedFactor - wanted) > 0.0001f) vehicle.SpeedFactor = wanted;
         }
 
         protected override void Revert()
@@ -137,6 +171,9 @@ namespace MoonSweepersTwitch.Game
                 _settings.jumpHeight = _jumpHeight!.Value;
                 _settings.runSpeed = _runSpeed!.Value;
             }
+            foreach (var (vehicle, factor) in _vehicles)
+                if (vehicle != null) vehicle.SpeedFactor = factor;
+            _vehicles.Clear();
             _settings = null;
             _gravity = _jumpHeight = _runSpeed = null;
             _level = 1;
