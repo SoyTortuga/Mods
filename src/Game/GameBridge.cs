@@ -364,6 +364,33 @@ namespace MoonSweepersTwitch.Game
                     switchedOff++;
             }
 
+            if (robots.Length == 0)
+            {
+                // MapRobots came back empty; fall back to the loaded robot docks.
+                var docks = MoonRobotDock.all?.ToArray();
+                int dockCount = docks != null ? docks.Length : 0;
+                for (int i = 0; i < dockCount; i++)
+                {
+                    var dock = docks![i];
+                    var robot = dock?.Robot;
+                    if (dock == null || robot == null) continue;
+
+                    var kind = robot.Launcher != null
+                        ? MoonWorld.MapRobotKind.Joonas
+                        : MoonWorld.MapRobotKind.MkI; // MkI vs MkII isn't distinguishable here; both count as Roombas
+                    bool wanted = Array.IndexOf(kinds, kind) >= 0 ||
+                                  (kind == MoonWorld.MapRobotKind.MkI && Array.IndexOf(kinds, MoonWorld.MapRobotKind.MkII) >= 0);
+                    if (!wanted) continue;
+                    total++;
+
+                    int id = dock.DockId;
+                    if (!world.RobotOn(id)) { alreadyOff++; continue; }
+                    if (Step($"{label}: SetRobotOn({id}, false) [dock fallback, {kind}]", () => world.SetRobotOn(id, false)))
+                        switchedOff++;
+                }
+                Plugin.Log.LogInfo($"[GameBridge] {label}: MapRobots was empty; checked {dockCount} loaded dock(s).");
+            }
+
             Plugin.Log.LogInfo(
                 $"[GameBridge] {label}: switched off {switchedOff} of {total} robot(s) " +
                 $"({alreadyOff} were already off). ({ctx.Describe()})");
@@ -392,8 +419,23 @@ namespace MoonSweepersTwitch.Game
                 return;
             }
 
-            Step("Bankrupt: ChargeBuild", () => world.ChargeBuild(player, before));
+            // ChargeBuild adds the amount it's given (charging the balance doubled it in the
+            // first test), so a spend is a negative amount.
+            Step("Bankrupt: ChargeBuild(-balance)", () => world.ChargeBuild(player, -before));
             double afterDollars = Il2CppSystem.Decimal.ToDouble(world.WalletDollars(player));
+
+            if (Math.Abs(afterDollars) > 0.005)
+            {
+                // Fall back to the shared balance itself.
+                var wallets = world.wallets;
+                if (wallets != null)
+                {
+                    Plugin.Log.LogWarning(
+                        $"[GameBridge] Bankrupt: ChargeBuild left ${afterDollars:0.##}; setting the shared balance to 0.");
+                    wallets.Balance = Il2CppSystem.Decimal.Zero;
+                    afterDollars = Il2CppSystem.Decimal.ToDouble(world.WalletDollars(player));
+                }
+            }
             Plugin.Log.LogInfo(
                 $"[GameBridge] Bankrupt: wallet ${beforeDollars:0.##} -> ${afterDollars:0.##}. ({ctx.Describe()})");
         }
