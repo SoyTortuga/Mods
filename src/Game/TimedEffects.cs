@@ -228,7 +228,7 @@ namespace MoonSweepersTwitch.Game
     }
 
     /// <summary>
-    /// Tiny Pockets: cuts how much dust the player can carry to a quarter.
+    /// Tiny Pockets: cuts how much dust the player (and every vehicle) can carry in half.
     ///
     /// The game works capacity out (<c>MoonWorld.InventoryCapacityKg</c>) from a small base
     /// (<c>MoonSettings.inventoryCapacityKg</c>, 1 kg) plus the dust container's capacity,
@@ -238,7 +238,7 @@ namespace MoonSweepersTwitch.Game
     /// </summary>
     internal sealed class TinyPocketsEffect : TimedEffect
     {
-        private const float Factor = 0.25f;
+        private const float Factor = 0.5f;
         private MoonSettings? _settings;
         private float? _baseKg;
         private readonly List<(MoonToolDefinition tool, float kg)> _containers =
