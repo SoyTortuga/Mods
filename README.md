@@ -16,8 +16,8 @@ The whole **Twitch side is complete and working**: OAuth, token refresh, EventSu
 connection with auto-reconnect, channel-point and bits subscriptions, and routing
 events to named effects via your config.
 
-The **chat sabotage effects below are implemented** against the real game code. The first
-all are tested in-game except `joonasoff` and `roombaoff`, which still need a save that has robots:
+The **chat sabotage effects below are implemented** against the real game code.
+All are tested in-game except `joonasoff` and `roombaoff`, which still need a save that has robots:
 
 | Key | What it does |
 |---|---|
