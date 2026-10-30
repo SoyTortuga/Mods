@@ -40,8 +40,9 @@ All are tested in-game except `joonasoff` and `roombaoff`, which still need a sa
 | `moonstorm` | Cuts visibility to about 35 m with a grey storm wall and fog for 10 minutes. |
 | `endall` | Ends every timed effect immediately. |
 
-Robots and money are shared world state, so those effects hit the whole crew. The
-timed effects change the streamer's own game, so they affect only the streamer.
+Effects are shared through the Steam lobby with every player who runs the mod (see
+`[Crew] Enabled`). Robots and money are shared world state, so those effects run once, on
+the host.
 
 There are **test hotkeys** (off by default: set `TestEffectKey` and friends in the
 config) so you can fire effects without opening Twitch. On-screen toasts don't show on
@@ -68,7 +69,7 @@ effect fired.
 ## Install BepInEx + patcher (one time)
 
 1. Install **BepInEx 6 (IL2CPP, win-x64)** into the Moon Sweepers folder
-   (where `Moon Sweepers.exe` lives). You should end up with a `BepInEx` folder,
+   (where `MoonSweepers.exe` lives). You should end up with a `BepInEx` folder,
    `winhttp.dll`, and `doorstop_config.ini` next to the exe.
 2. Install the **MoonSweepers BepInEx Patcher** per its instructions (typically a DLL
    dropped into `BepInEx/patchers/`).

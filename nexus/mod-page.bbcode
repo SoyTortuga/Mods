@@ -1,0 +1,81 @@
+[size=5][b]Moon Sweepers Twitch Integration[/b][/size]
+
+Let your Twitch chat sabotage your moon-sweeping shift. Viewers spend Bits on custom Power-ups (or cheers, or Channel Points) to switch off your helmet lamp, flip the moon upside down, crank gravity to 8x, spill your dust, or drain the crew's money to $0.
+
+Effects hit [b]every player in the lobby who runs the mod[/b], not just the streamer. Only the streamer connects to Twitch; everyone else just installs the mod.
+
+[size=4][b]Effects[/b][/size]
+[list]
+[*][b]Lights Out[/b] (15 min): helmet lamps switch off and stay off.
+[*][b]Half Reach[/b] (10 min): reach for picking up dust canisters is halved.
+[*][b]Refill a Sector[/b]: a random sector the crew already cleared fills back up with dust, for everyone.
+[*][b]2x / 4x / 8x Gravity[/b] (15 min): gravity is 2, 4 or 8 times stronger, and running, jumping and vehicles slow down to match. A stronger level takes over and restarts the timer.
+[*][b]Spill the Dust[/b]: all carried dust drops on the ground as 1 kg canisters.
+[*][b]Fisheye[/b] / [b]Tunnel Vision[/b] (15 min): field of view 140° or 30°.
+[*][b]Moon Fog[/b] (10 min): grey fog cuts visibility to about 35 m.
+[*][b]Tiny Pockets[/b] (15 min): dust capacity is halved, on foot and in vehicles.
+[*][b]Potato Mode[/b] (15 min): the game renders at a quarter resolution.
+[*][b]Roomba Shutdown[/b]: every robot vacuum switches off and heads back to its dock.
+[*][b]Back to Square One[/b] (15 min): the brush is swapped for the starter toothbrush, then given back.
+[*][b]Australian Moon[/b] (10 min): the view turns upside down; the HUD stays upright.
+[*][b]J.O.O.N.A.S. Shutdown[/b]: J.O.O.N.A.S. switches off until someone switches it back on.
+[*][b]Shrink-Flation[/b] (30 min): pay per kg and per sector is halved.
+[*][b]Inverted Controls[/b] (10 min): movement and camera controls are reversed.
+[*][b]Vehicle Breakdown[/b] (15 min): everyone is thrown out of their vehicle and can't get back in.
+[*][b]Bankruptcy[/b]: the crew's shared money drains to $0.
+[*][b]Mercy[/b]: ends every active timed effect at once.
+[/list]
+The names are yours to choose: you map your own Power-up titles to effects in the config.
+
+[size=4][b]Requirements[/b][/size]
+[list]
+[*][b]Moon Sweepers[/b] on Steam (Windows).
+[*][b]BepInEx 6.0.0-be.791, Unity.IL2CPP win-x64[/b]: [url=https://builds.bepinex.dev/projects/bepinex_be/791/BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.791%2Bb782da4.zip]direct download[/url]. Other BepInEx builds (Mono, 5.x, other bleeding-edge builds) don't work with the patcher.
+[*][url=https://www.nexusmods.com/moonsweepers/mods/9]MoonSweepers BepInEx Patcher[/url] by boverson777.
+[*][b]For the streamer only:[/b] Twitch Affiliate or Partner (needed for Bits and Power-ups).
+[/list]
+
+[size=4][b]Installing[/b][/size]
+[b]With Vortex:[/b] install the [url=https://www.nexusmods.com/site/mods/2517]Moon Sweepers Vortex Extension[/url], then BepInEx, the patcher and this mod. Or grab the collection, which does all of it in one go.
+
+[b]By hand:[/b]
+[list=1]
+[*]Extract BepInEx into the game folder (where [i]MoonSweepers.exe[/i] is).
+[*]Extract the patcher into the same folder, so you have [i]BepInEx\patchers\MoonSweepers.ModEngine\MoonSweepers.ModEngine.dll[/i].
+[*]Extract this mod into [i]BepInEx\plugins[/i], so you have [i]BepInEx\plugins\MoonSweepersTwitch\MoonSweepersTwitch.dll[/i].
+[*]Start the game. The first start takes about 15 seconds longer while BepInEx sets itself up.
+[/list]
+The game folder is usually [i]C:\Program Files (x86)\Steam\steamapps\common\Moon Sweepers[/i].
+
+[size=4][b]Streamer setup[/b][/size]
+[list=1]
+[*]Start the game. The BepInEx console window shows [i]TWITCH SETUP: open https://www.twitch.tv/activate and enter code XXXXXXXX[/i].
+[*]Open that page signed in as your channel's account, enter the code and approve. The mod asks to read Channel Point redemptions and Bits. It stays signed in from then on.
+[*]Create your custom Power-ups on Twitch (Creator Dashboard). Twitch doesn't let mods create them, so this part is manual. Pick any titles and prices you like.
+[*]Quit the game and open [i]BepInEx\config\com.soytortuga.moonsweepers.twitch.cfg[/i]. Under [b][PowerUps][/b], map each Power-up title to an effect key:
+[code]PowerUpMappings = Lights Out=>lightsout || Moon Fog=>moonstorm || Bankruptcy=>bankrupt[/code]
+[*]Start the game again. The log ([i]BepInEx\LogOutput.log[/i]) lists each of your Power-ups with its price and the effect it's mapped to, and warns about any title that doesn't match.
+[/list]
+Nothing triggers on a fresh install until you add mappings.
+
+[b]Effect keys:[/b] lightsout, butterfingers, refilldust, gravity2x, gravity4x, gravity8x, emptydust, fisheye, tunnelvision, moonstorm, tinypockets, potato, roombaoff, toothbrush, australianmoon, joonasoff, paycut, reversecontrols, breakdown, bankrupt, endall
+
+You can also use cheers ([b][Bits] BitMappings[/b], e.g. [i]500=>emptydust[/i]; the highest amount at or below the cheer fires) or Channel Points ([b][ChannelPoints] RewardMappings[/b], matched by reward title). Both are off or empty by default.
+
+[size=4][b]Crew setup[/b][/size]
+Install the same three things (BepInEx, the patcher, this mod) and play in the streamer's lobby. That's it.
+
+Crew members don't need a Twitch account. To stop the Twitch sign-in prompt from appearing, set [b][Twitch] Enabled = false[/b] in the config after the first start. Effects reach anyone in the lobby with the mod, including players who join while an effect is running (they get the time that's left). Bankruptcy and the robot shutdowns run once, on the host, since money and robots are shared.
+
+[size=4][b]Good to know[/b][/size]
+[list]
+[*]Players without the mod aren't affected. The lobby's host must run the mod for Bankruptcy and the robot shutdowns to work.
+[*]A weaker gravity Power-up bought while a stronger one is running does nothing.
+[*]If the game closes mid-effect, everything goes back to normal, and a swapped brush is given back on the next load.
+[*]Game updates can break mods like this one. If an effect stops working after a patch, check [i]BepInEx\LogOutput.log[/i] and report it in Bugs.
+[/list]
+
+[size=4][b]Source and license[/b][/size]
+Open source under the MIT license: [url=https://github.com/SoyTortuga/Mods]github.com/SoyTortuga/Mods[/url].
+
+Not affiliated with DragDrop Games or Twitch. Thanks to boverson777 for the patcher that makes BepInEx work on this game, and ChemBoy1 for the Vortex extension.

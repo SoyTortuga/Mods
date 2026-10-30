@@ -1,0 +1,77 @@
+Moon Sweepers Twitch Integration - custom Power-ups
+====================================================
+
+Each Power-up's title must match PowerUpMappings in the mod's config (capitals don't
+matter; spaces and punctuation do). Effects hit every player in the lobby who runs the mod.
+
+
+Lights Out - 250 Bits
+Everyone's helmet lamp switches off and stays off for 15 minutes.
+
+Half Reach - 500 Bits
+Everyone's reach for picking up dust canisters is cut in half for 10 minutes.
+
+Refill a Sector - 500 Bits
+A random sector the crew already cleared fills back up with dust.
+
+2x Gravity - 750 Bits
+Gravity doubles for 15 minutes: falling is twice as strong, and running, jumping and vehicles are at half speed.
+
+Spill The Dust - 1,000 Bits
+Everyone drops all the dust they're carrying, scattered on the ground as 1 kg canisters to pick back up.
+
+Fisheye Filter - 1,000 Bits
+Everyone's field of view widens to 140° for 15 minutes.
+
+Tunnel Vision - 1,000 Bits
+Everyone's field of view narrows to 30° for 15 minutes.
+
+Moon Fog - 1,000 Bits
+A grey fog rolls in for 10 minutes, cutting visibility to about 35 m.
+
+Tiny Pockets - 1,250 Bits
+Everyone can carry only half as much dust, on foot and in vehicles, for 15 minutes. Dust already carried is kept.
+
+4x Gravity - 1,500 Bits
+Gravity is 4x stronger for 15 minutes, and running, jumping and vehicles are at a quarter speed.
+
+Potato Mode - 1,500 Bits
+The game renders at a quarter of its resolution for 15 minutes.
+
+Roomba Shutdown - 2,000 Bits
+Every Roomba switches off and heads back to its dock until someone switches it back on.
+
+Back to Square One - 2,500 Bits
+Everyone's brush is swapped for the starter toothbrush for 15 minutes, then given back.
+
+Australian Moon - 2,500 Bits
+Everyone's view turns upside down for 10 minutes. The HUD stays upright.
+
+8x Gravity - 3,000 Bits
+Gravity is 8x stronger for 15 minutes, and running, jumping and vehicles are at an eighth speed.
+
+JOONAS Shutdown - 3,000 Bits
+J.O.O.N.A.S. switches off. Someone has to find it and switch it back on.
+
+Shrink-Flation - 3,000 Bits
+Pay for every kg of dust and every finished sector is cut in half for 30 minutes.
+
+Inverted Controls - 3,000 Bits
+Movement and camera controls are reversed for 10 minutes.
+
+Vehicle Breakdown - 5,000 Bits
+Everyone is thrown out of their vehicle and can't get back in for 15 minutes.
+
+Mercy - 5,000 Bits
+Ends every active timed effect right away.
+
+Bankruptcy - 10,000 Bits
+The crew's shared money drains to $0.
+
+
+Notes
+-----
+- A stronger gravity Power-up replaces a weaker one and restarts the 15 minutes, and the
+  same one used again restarts the timer. A weaker one used while a stronger one is
+  running does nothing, so viewers may want to know before they spend Bits on it.
+- Roomba Shutdown and JOONAS Shutdown haven't been tested in a save with robots yet.
