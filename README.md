@@ -134,6 +134,9 @@ Key settings:
 | `Twitch` | `EnableChannelPoints` / `EnableBits` | Turn each event source on/off. |
 | `ChannelPoints` | `RewardMappings` | Reward → effect map. |
 | `Bits` | `BitMappings` | Cheer-amount → effect map. |
+| `Twitch` | `EnablePowerUps` | Listen for custom Power-ups (Bits-priced rewards). |
+| `PowerUps` | `PowerUpMappings` | Power-up title → effect map. Prices can repeat. |
+| `Crew` | `Enabled` | Share effects with lobby members who also run the mod. |
 | `General` | `ShowOnScreenFeedback` | Toggle the on-screen toasts. |
 | `General` | `DebugLogging` | Log raw events, reward titles/ids, etc. |
 | `General` | `TestEffectKey` / `TestEffectKeyEffect` | Hotkey + which effect it fires. |
@@ -149,9 +152,17 @@ RewardMappings = Tunnel Vision=>tunnelvision || Lights Out=>lightsout
 BitMappings = 100=>tunnelvision || 500=>emptydust || 10000=>bankrupt
 ```
 
-Both are empty on a fresh install, so nothing triggers until you set your own.
+```ini
+[PowerUps]
+# Custom Power-ups are Bits-priced rewards you create on Twitch, matched by title,
+# so any number of them can share a price.
+PowerUpMappings = Tunnel Vision=>tunnelvision || Spill the Dust=>emptydust || Bankrupt=>bankrupt
+```
 
-- Channel Point rewards match by **title** (case-insensitive). To match by the reward's
+All three are empty on a fresh install, so nothing triggers until you set your own.
+Custom Power-ups need Twitch to have enabled them for your channel.
+
+- Channel Point rewards and custom Power-ups match by **title** (case-insensitive). To match by the reward's
   stable id instead, use `id:<reward-id>=>effectKey`. Turn on `DebugLogging` to print
   titles and ids when you redeem.
 - Effect keys: see the table above.

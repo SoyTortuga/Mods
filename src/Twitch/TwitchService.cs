@@ -18,6 +18,9 @@ namespace MoonSweepersTwitch.Twitch
     {
         private const string RedemptionType = "channel.channel_points_custom_reward_redemption.add";
         private const string CheerType = "channel.cheer";
+        // Fires for cheers, Twitch's own Power-ups and custom Power-ups; only custom
+        // Power-ups are handled here (cheers arrive on channel.cheer).
+        private const string BitsUseType = "channel.bits.use";
 
         private readonly PluginConfig _config;
         private readonly EffectRegistry _effects;
@@ -30,6 +33,8 @@ namespace MoonSweepersTwitch.Twitch
         private readonly Dictionary<string, string> _rewardByTitle = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, string> _rewardById = new(StringComparer.OrdinalIgnoreCase);
         private readonly List<(int threshold, string key)> _bitRules = new();
+        private readonly Dictionary<string, string> _powerUpByTitle = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _powerUpById = new(StringComparer.OrdinalIgnoreCase);
 
         private string _broadcasterId = "";
 
@@ -42,7 +47,7 @@ namespace MoonSweepersTwitch.Twitch
 
             var scopes = new List<string>();
             if (config.EnableChannelPoints.Value) scopes.Add("channel:read:redemptions");
-            if (config.EnableBits.Value) scopes.Add("bits:read");
+            if (config.EnableBits.Value || config.EnablePowerUps.Value) scopes.Add("bits:read");
             if (scopes.Count == 0)
             {
                 // Nothing enabled — still authorize with a harmless read scope so the
@@ -83,6 +88,19 @@ namespace MoonSweepersTwitch.Twitch
 
             if (_config.EnableBits.Value)
                 await SubscribeWithRetryAsync(CheerType, "1", condition, sessionId, ct).ConfigureAwait(false);
+
+            if (_config.EnablePowerUps.Value)
+            {
+                // Last, and non-fatal: a channel without custom Power-ups keeps the others.
+                try
+                {
+                    await SubscribeWithRetryAsync(BitsUseType, "1", condition, sessionId, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Plugin.Log.LogWarning("Couldn't listen for custom Power-ups: " + ex.Message);
+                }
+            }
         }
 
         private async Task SubscribeWithRetryAsync(
@@ -113,7 +131,45 @@ namespace MoonSweepersTwitch.Twitch
                 case CheerType:
                     HandleCheer(evt);
                     break;
+                case BitsUseType:
+                    HandleBitsUse(evt);
+                    break;
             }
+        }
+
+        private void HandleBitsUse(JsonElement evt)
+        {
+            if (GetString(evt, "type") != "custom_power_up") return;
+            if (!evt.TryGetProperty("custom_power_up", out var power) || power.ValueKind != JsonValueKind.Object) return;
+
+            string user = GetString(evt, "user_name");
+            string title = GetString(power, "title");
+            string rewardId = GetString(power, "reward_id");
+            int bits = evt.TryGetProperty("bits", out var b) && b.ValueKind == JsonValueKind.Number ? b.GetInt32() : 0;
+            string message = evt.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.Object
+                ? GetString(m, "text") : "";
+
+            if (_config.DebugLogging.Value)
+                Plugin.Log.LogDebug($"Custom Power-up: title='{title}' id='{rewardId}' bits={bits} by {user}");
+
+            string? key = null;
+            if (!_powerUpById.TryGetValue(rewardId, out key))
+                _powerUpByTitle.TryGetValue(title.Trim(), out key);
+
+            if (key == null)
+            {
+                Plugin.Log.LogInfo($"No mapping for Power-up '{title}'. Add '{title}=>someEffect' to PowerUpMappings.");
+                return;
+            }
+
+            _effects.Trigger(key, new EffectContext
+            {
+                Source = EffectSource.PowerUp,
+                UserName = user,
+                Amount = bits,
+                RewardTitle = title,
+                Message = message,
+            });
         }
 
         private void HandleRedemption(JsonElement evt)
@@ -199,6 +255,17 @@ namespace MoonSweepersTwitch.Twitch
             }
 
             _bitRules.Sort((x, y) => y.threshold.CompareTo(x.threshold)); // highest first
+
+            foreach (var (left, right) in ParsePairs(_config.PowerUpMappings.Value))
+            {
+                if (!_effects.Contains(right))
+                    Plugin.Log.LogWarning($"PowerUpMappings references unknown effect '{right}'.");
+
+                if (left.StartsWith("id:", StringComparison.OrdinalIgnoreCase))
+                    _powerUpById[left.Substring(3).Trim()] = right;
+                else
+                    _powerUpByTitle[left] = right;
+            }
         }
 
         private static IEnumerable<(string left, string right)> ParsePairs(string raw)

@@ -17,9 +17,11 @@ namespace MoonSweepersTwitch.Config
         public readonly ConfigEntry<string> ClientId;
         public readonly ConfigEntry<bool> EnableChannelPoints;
         public readonly ConfigEntry<bool> EnableBits;
+        public readonly ConfigEntry<bool> EnablePowerUps;
 
         public readonly ConfigEntry<string> RewardMappings;
         public readonly ConfigEntry<string> BitMappings;
+        public readonly ConfigEntry<string> PowerUpMappings;
 
         public readonly ConfigEntry<bool> ShowOnScreenFeedback;
         public readonly ConfigEntry<bool> DebugLogging;
@@ -54,6 +56,12 @@ namespace MoonSweepersTwitch.Config
                 "Twitch", "EnableBits", true,
                 "Listen for Bits/cheers (needs the bits:read scope — requested automatically).");
 
+            EnablePowerUps = config.Bind(
+                "Twitch", "EnablePowerUps", true,
+                "Listen for custom Power-ups: Bits-priced rewards you create on Twitch (needs the " +
+                "bits:read scope — requested automatically). Unlike cheer amounts, any number of " +
+                "Power-ups can share a price, since each is matched by its title.");
+
             RewardMappings = config.Bind(
                 "ChannelPoints", "RewardMappings", "",
                 "Map Channel Point rewards to effects. Pairs are separated by '||' and " +
@@ -68,6 +76,14 @@ namespace MoonSweepersTwitch.Config
                 "(e.g. 100=>tunnelvision || 500=>emptydust). Empty means cheers trigger nothing. " +
                 "When someone cheers N bits, the effect for the HIGHEST threshold <= N fires. " +
                 "Available built-in effect keys: " + Effects.EffectKeyList + ".");
+
+            PowerUpMappings = config.Bind(
+                "PowerUps", "PowerUpMappings", "",
+                "Map custom Power-ups to effects. Pairs separated by '||', each 'PowerUpTitle=>effectKey' " +
+                "(e.g. Tunnel Vision=>tunnelvision || Bankrupt=>bankrupt). Match is by title " +
+                "(case-insensitive); use 'id:<reward-id>=>effectKey' to match by id instead. With " +
+                "DebugLogging on, each Power-up's title and id are logged when it's used. " +
+                "Available effect keys: " + Effects.EffectKeyList + ".");
 
             ShowOnScreenFeedback = config.Bind(
                 "General", "ShowOnScreenFeedback", true,

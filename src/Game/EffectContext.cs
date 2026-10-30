@@ -5,6 +5,8 @@ namespace MoonSweepersTwitch.Game
         ChannelPoints,
         Bits,
         Test,
+        /// <summary>A custom Power-up: a Bits-priced reward the streamer created.</summary>
+        PowerUp,
         /// <summary>Relayed from another player's game through the lobby (see <see cref="CrewRelay"/>).</summary>
         Crew,
     }
@@ -58,6 +60,7 @@ namespace MoonSweepersTwitch.Game
         {
             EffectSource.ChannelPoints => $"{UserName} redeemed \"{RewardTitle}\"",
             EffectSource.Bits => $"{UserName} cheered {Amount} bits",
+            EffectSource.PowerUp => $"{UserName} used Power-up \"{RewardTitle}\"",
             EffectSource.Crew => $"relayed from {UserName}",
             _ => "Test trigger",
         };
