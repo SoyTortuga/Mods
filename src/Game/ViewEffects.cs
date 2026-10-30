@@ -178,7 +178,7 @@ namespace MoonSweepersTwitch.Game
     internal sealed class MoonStormEffect : TimedEffect
     {
         private const float Distance = 35f;
-        private static readonly Color StormGrey = new Color(0.42f, 0.40f, 0.38f, 1f);
+        private static readonly Color StormGrey = new Color(136f / 255f, 139f / 255f, 142f / 255f, 1f); // #888b8e
 
         private bool? _fog;
         private FogMode _fogMode;
