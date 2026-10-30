@@ -49,7 +49,7 @@ namespace MoonSweepersTwitch.Game
             for (int i = 0; array != null && i < count; i++)
             {
                 var b = array[start + i];
-                if (b == null || b.isPartOfComposite) continue;
+                if (b is null || b.isPartOfComposite) continue;
 
                 string current = b.effectiveProcessors ?? "";
                 if (current.Contains(Invert)) continue;
@@ -110,7 +110,7 @@ namespace MoonSweepersTwitch.Game
             {
                 var b = array[start + i];
                 string? procs = b?.overrideProcessors;
-                if (b == null || string.IsNullOrEmpty(procs) || !procs!.Contains(Invert)) continue;
+                if (b is null || string.IsNullOrEmpty(procs) || !procs!.Contains(Invert)) continue;
 
                 var kept = new List<string>();
                 foreach (var p in procs.Split(','))

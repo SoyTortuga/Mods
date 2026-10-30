@@ -71,6 +71,8 @@ namespace MoonSweepersTwitch.Game
                     _lastError = ex.Message;
                     Plugin.Log.LogError($"[Timed] {Name} threw (repeats suppressed): {ex}");
                 }
+                // A failed apply waits like a not-ready one, instead of retrying every frame.
+                if (!_applied) _retryAt = now + 2f;
             }
         }
 
