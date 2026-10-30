@@ -76,7 +76,84 @@ namespace MoonSweepersTwitch.Twitch
             _broadcasterId = id;
             Plugin.Log.LogInfo($"Twitch authorized as '{login}' (id {id}).");
 
+            if (_config.EnablePowerUps.Value)
+                await CheckPowerUpsAsync(token, ct).ConfigureAwait(false);
+
             await _eventSub.RunAsync(ct).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Compare the channel's real custom Power-ups with PowerUpMappings and log what
+        /// matches (with price), which mapped titles don't exist on Twitch, and which
+        /// Power-ups nothing is mapped to. Twitch has no API for creating Power-ups, so this
+        /// is how a typo is caught before a viewer pays for a Power-up that does nothing.
+        /// Never fatal.
+        /// </summary>
+        private async Task CheckPowerUpsAsync(string token, CancellationToken ct)
+        {
+            if (_powerUpByTitle.Count == 0 && _powerUpById.Count == 0) return;
+
+            List<HelixApi.CustomPowerUp> live;
+            try
+            {
+                live = await _helix.GetCustomPowerUpsAsync(token, _broadcasterId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Plugin.Log.LogWarning("Power-up check skipped: couldn't list the channel's custom Power-ups: " + ex.Message);
+                return;
+            }
+
+            var used = new HashSet<string>(StringComparer.Ordinal);
+            int matched = 0, missing = 0;
+
+            void Report(HelixApi.CustomPowerUp p, string key)
+            {
+                matched++;
+                used.Add(p.Id);
+                string state = !p.IsEnabled ? " (DISABLED on Twitch)" : p.IsPaused ? " (PAUSED on Twitch)" : "";
+                string line = $"Power-up check: '{p.Title}' {p.Bits} Bits -> {key}{state}";
+                if (state.Length > 0) Plugin.Log.LogWarning(line); else Plugin.Log.LogInfo(line);
+            }
+
+            foreach (var (title, key) in _powerUpByTitle)
+            {
+                var p = live.Find(x => string.Equals(x.Title.Trim(), title, StringComparison.OrdinalIgnoreCase));
+                if (p != null) { Report(p, key); continue; }
+
+                missing++;
+                var near = live.Find(x => Squash(x.Title) == Squash(title));
+                Plugin.Log.LogWarning(near != null
+                    ? $"Power-up check: '{title}' -> {key} has no exact match on Twitch. Did you mean '{near.Title}'? Fix one so they match."
+                    : $"Power-up check: '{title}' -> {key} doesn't exist on Twitch. Create it, or fix the title in PowerUpMappings.");
+            }
+
+            foreach (var (rewardId, key) in _powerUpById)
+            {
+                var p = live.Find(x => string.Equals(x.Id, rewardId, StringComparison.OrdinalIgnoreCase));
+                if (p != null) { Report(p, key); continue; }
+                missing++;
+                Plugin.Log.LogWarning($"Power-up check: id '{rewardId}' -> {key} doesn't exist on Twitch.");
+            }
+
+            int unmapped = 0;
+            foreach (var p in live)
+            {
+                if (used.Contains(p.Id)) continue;
+                unmapped++;
+                Plugin.Log.LogInfo($"Power-up check: '{p.Title}' ({p.Bits} Bits) is on Twitch but no effect is mapped to it.");
+            }
+
+            string summary = $"Power-up check: {matched} matched, {missing} missing on Twitch, {unmapped} not mapped.";
+            if (missing > 0) Plugin.Log.LogWarning(summary); else Plugin.Log.LogInfo(summary);
+        }
+
+        /// <summary>Lower-case letters and digits only, to spot titles that differ by spacing or punctuation.</summary>
+        private static string Squash(string s)
+        {
+            var sb = new System.Text.StringBuilder(s.Length);
+            foreach (char c in s) if (char.IsLetterOrDigit(c)) sb.Append(char.ToLowerInvariant(c));
+            return sb.ToString();
         }
 
         private async Task CreateSubscriptionsAsync(string sessionId, CancellationToken ct)

@@ -19,6 +19,17 @@ namespace MoonSweepersTwitch.Twitch
     {
         private const string UsersEndpoint = "https://api.twitch.tv/helix/users";
         private const string SubscriptionsEndpoint = "https://api.twitch.tv/helix/eventsub/subscriptions";
+        private const string CustomPowerUpsEndpoint = "https://api.twitch.tv/helix/bits/custom_power_ups";
+
+        /// <summary>One of the broadcaster's custom Power-ups, as Twitch lists it.</summary>
+        public sealed class CustomPowerUp
+        {
+            public string Id { get; init; } = "";
+            public string Title { get; init; } = "";
+            public int Bits { get; init; }
+            public bool IsEnabled { get; init; }
+            public bool IsPaused { get; init; }
+        }
 
         private readonly HttpClient _http;
         private readonly string _clientId;
@@ -82,6 +93,40 @@ namespace MoonSweepersTwitch.Twitch
             // 403 is the usual "your token lacks the scope" or "not affiliate" case.
             Plugin.Log.LogError($"Failed to subscribe to '{type}' ({(int)resp.StatusCode}): {body}");
             return false;
+        }
+
+        /// <summary>
+        /// The broadcaster's custom Power-ups (at most 50, so no paging). Read-only: Twitch
+        /// has no endpoint for creating them, so this is for checking the mappings.
+        /// </summary>
+        public async Task<System.Collections.Generic.List<CustomPowerUp>> GetCustomPowerUpsAsync(
+            string accessToken, string broadcasterId, CancellationToken ct)
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get,
+                CustomPowerUpsEndpoint + "?broadcaster_id=" + Uri.EscapeDataString(broadcasterId));
+            AddAuth(req, accessToken);
+
+            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+            var body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+            ThrowIfUnauthorized(resp, body);
+            var list = new System.Collections.Generic.List<CustomPowerUp>();
+            if (resp.StatusCode == HttpStatusCode.NotFound) return list; // no Power-ups on the channel
+            if (!resp.IsSuccessStatusCode)
+                throw new InvalidOperationException($"helix/bits/custom_power_ups failed ({(int)resp.StatusCode}): {body}");
+
+            using var doc = JsonDocument.Parse(body);
+            foreach (var p in doc.RootElement.GetProperty("data").EnumerateArray())
+            {
+                list.Add(new CustomPowerUp
+                {
+                    Id = p.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "",
+                    Title = p.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "",
+                    Bits = p.TryGetProperty("bits", out var b) && b.ValueKind == JsonValueKind.Number ? b.GetInt32() : 0,
+                    IsEnabled = p.TryGetProperty("is_enabled", out var e) && e.ValueKind == JsonValueKind.True,
+                    IsPaused = p.TryGetProperty("is_paused", out var ps) && ps.ValueKind == JsonValueKind.True,
+                });
+            }
+            return list;
         }
 
         private void AddAuth(HttpRequestMessage req, string accessToken)
