@@ -15,7 +15,8 @@ namespace MoonSweepersTwitch.Game
         public const string EffectKeyList =
             "breakdown, toothbrush, emptydust, refilldust, joonasoff, roombaoff, bankrupt, " +
             "gravity2x, gravity4x, gravity8x, lightsout, tunnelvision, fisheye, potato, paycut, " +
-            "tinypockets, butterfingers, endall, confetti, fog, dropdust, earthquake, speedboost, slowmo, payout";
+            "tinypockets, butterfingers, reversecontrols, australianmoon, moonstorm, endall, " +
+            "confetti, fog, dropdust, earthquake, speedboost, slowmo, payout";
 
         public static void RegisterBuiltIns(EffectRegistry registry, PluginConfig config)
         {
@@ -132,6 +133,24 @@ namespace MoonSweepersTwitch.Game
             {
                 Feedback(ctx, "🧈 Butterfingers!");
                 TimedEffects.Butterfingers.Start(seconds: 600f); // 10 minutes
+            }));
+
+            registry.Register(new Effect("reversecontrols", "Reverse controls", ctx =>
+            {
+                Feedback(ctx, "🔄 Controls reversed!");
+                TimedEffects.Reverse.Start(seconds: 600f); // 10 minutes
+            }));
+
+            registry.Register(new Effect("australianmoon", "Australian moon", ctx =>
+            {
+                Feedback(ctx, "🙃 Australian moon!");
+                TimedEffects.UpsideDown.Start(seconds: 600f); // 10 minutes
+            }));
+
+            registry.Register(new Effect("moonstorm", "Moon storm", ctx =>
+            {
+                Feedback(ctx, "🌪 Moon storm!");
+                TimedEffects.Storm.Start(seconds: 600f); // 10 minutes
             }));
 
             registry.Register(new Effect("endall", "End all timed effects", ctx =>

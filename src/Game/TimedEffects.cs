@@ -26,6 +26,9 @@ namespace MoonSweepersTwitch.Game
 
         public bool Active => Time.realtimeSinceStartup < _until;
 
+        /// <summary>Applied and still running (used by the camera hook).</summary>
+        public bool IsApplied => _applied && Active;
+
         public void Start(float seconds)
         {
             _until = Time.realtimeSinceStartup + seconds;
@@ -539,8 +542,12 @@ namespace MoonSweepersTwitch.Game
         public static readonly SettingsScaleEffect Butterfingers = new SettingsScaleEffect("Butterfingers", 0.5f,
             ("canisterPickupReach", s => s.canisterPickupReach, (s, v) => s.canisterPickupReach = v));
 
+        public static readonly ReverseControlsEffect Reverse = new ReverseControlsEffect();
+        public static readonly UpsideDownEffect UpsideDown = new UpsideDownEffect();
+        public static readonly MoonStormEffect Storm = new MoonStormEffect();
+
         private static readonly TimedEffect[] All =
-            { Gravity, Fov, LightsOut, Potato, Paycut, TinyPockets, Butterfingers };
+            { Gravity, Fov, LightsOut, Potato, Paycut, TinyPockets, Butterfingers, Reverse, UpsideDown, Storm };
 
         private static bool _fovRestoreChecked;
         private static float _fovRestoreRetryAt;
@@ -554,6 +561,9 @@ namespace MoonSweepersTwitch.Game
 
             if (!_vehicleRestoreChecked && !TinyPockets.Active && Time.realtimeSinceStartup >= _vehicleRestoreRetryAt)
                 CheckPendingVehicleRestore();
+
+            if (!_reverseRestoreChecked && !Reverse.Active && Time.realtimeSinceStartup >= _reverseRestoreRetryAt)
+                CheckPendingReverseRestore();
         }
 
         /// <summary>End every timed effect now; each restores its originals on the next tick.</summary>
@@ -565,6 +575,46 @@ namespace MoonSweepersTwitch.Game
         /// <summary>The game's tuning sheet (gravity, speeds, pay rates, capacities).</summary>
         internal static MoonSettings? Settings() =>
             GameBridge.FindFirst<MoonDustInventory>()?.World?.settings;
+
+        // ---- Reverse controls note (in case the game saves input overrides) ----
+
+        private static bool _reverseRestoreChecked;
+        private static float _reverseRestoreRetryAt;
+
+        private static string ReverseNotePath => System.IO.Path.Combine(
+            BepInEx.Paths.ConfigPath, "com.soytortuga.moonsweepers.twitch.reverse-controls-restore.txt");
+
+        internal static void WriteReverseControlsNote()
+        {
+            try { System.IO.File.WriteAllText(ReverseNotePath, "move/look bindings inverted"); }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Timed] Couldn't write the reverse-controls note: " + ex.Message); }
+        }
+
+        internal static void DeleteReverseControlsNote()
+        {
+            try { if (System.IO.File.Exists(ReverseNotePath)) System.IO.File.Delete(ReverseNotePath); }
+            catch (Exception ex) { Plugin.Log.LogWarning("[Timed] Couldn't delete the reverse-controls note: " + ex.Message); }
+        }
+
+        private static void CheckPendingReverseRestore()
+        {
+            if (!System.IO.File.Exists(ReverseNotePath))
+            {
+                _reverseRestoreChecked = true;
+                return;
+            }
+            _reverseRestoreRetryAt = Time.realtimeSinceStartup + 5f;
+            try
+            {
+                if (!ReverseControlsEffect.StripLeftoverInversion()) return; // no player yet
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogWarning("[Timed] Reverse-controls restore failed: " + ex.Message);
+            }
+            DeleteReverseControlsNote();
+            _reverseRestoreChecked = true;
+        }
 
         // ---- Vehicle capacity restore note (vehicle storage is saved with the game) ----
 

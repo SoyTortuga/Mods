@@ -35,6 +35,9 @@ four (`breakdown` to `refilldust`) are tested in-game; the rest are new and stil
 | `paycut` | Half pay per kg and per section for 30 minutes. |
 | `tinypockets` | Dust carrying capacity (on foot and in vehicles) halved for 15 minutes; dust already carried is kept. |
 | `butterfingers` | Canister pickup reach halved for 10 minutes. |
+| `reversecontrols` | Inverts movement and look (both axes) for 10 minutes. |
+| `australianmoon` | Turns the view upside down for 10 minutes; the HUD stays upright. |
+| `moonstorm` | Cuts visibility to about 35 m with a grey storm wall and fog for 10 minutes. |
 | `endall` | Ends every timed effect immediately. |
 
 Robots and money are shared world state, so those effects hit the whole crew. The
