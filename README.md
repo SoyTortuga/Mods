@@ -43,12 +43,7 @@ All are tested in-game except `joonasoff` and `roombaoff`, which still need a sa
 Robots and money are shared world state, so those effects hit the whole crew. The
 timed effects change the streamer's own game, so they affect only the streamer.
 
-The remaining template effects (`confetti`, `fog`, `dropdust`, `earthquake`,
-`speedboost`, `slowmo`, `payout`) are still stubs that only log; to make one real,
-finish its method in [`src/Game/GameBridge.cs`](src/Game/GameBridge.cs). See
-[Wiring effects into the game](#wiring-effects-into-the-game).
-
-There are two **test hotkeys** (F8 and F9 by default, each mapped to an effect in the
+There are **test hotkeys** (off by default: set `TestEffectKey` and friends in the
 config) so you can fire effects without opening Twitch. On-screen toasts don't show on
 this build of the game (its IMGUI is stripped), so check the BepInEx log to confirm an
 effect fired.
@@ -134,7 +129,8 @@ Key settings:
 
 | Section | Key | What it does |
 |---|---|---|
-| `Twitch` | `ClientId` | Your Twitch app Client ID. |
+| `Twitch` | `Enabled` | Connect to Twitch. Crew members who aren't streaming set this to `false`. |
+| `Twitch` | `ClientId` | Twitch app Client ID. Defaults to the mod's shared app; only change it to use your own. |
 | `Twitch` | `EnableChannelPoints` / `EnableBits` | Turn each event source on/off. |
 | `ChannelPoints` | `RewardMappings` | Reward → effect map. |
 | `Bits` | `BitMappings` | Cheer-amount → effect map. |
@@ -146,25 +142,25 @@ Key settings:
 
 ```ini
 [ChannelPoints]
-RewardMappings = Make it Foggy=>fog || Dump Dust=>dropdust || Shake the Moon=>earthquake
+RewardMappings = Tunnel Vision=>tunnelvision || Lights Out=>lightsout
 
 [Bits]
 # When someone cheers N bits, the effect for the HIGHEST threshold <= N fires.
-BitMappings = 1=>confetti || 100=>fog || 1000=>earthquake
+BitMappings = 100=>tunnelvision || 500=>emptydust || 10000=>bankrupt
 ```
+
+Both are empty on a fresh install, so nothing triggers until you set your own.
 
 - Channel Point rewards match by **title** (case-insensitive). To match by the reward's
   stable id instead, use `id:<reward-id>=>effectKey`. Turn on `DebugLogging` to print
   titles and ids when you redeem.
-- Built-in effect keys: see the table above (working),
-  plus the stubbed `confetti`, `fog`, `dropdust`, `earthquake`, `speedboost`, `slowmo`,
-  `payout`.
+- Effect keys: see the table above.
 
 ---
 
 ## First-run authorization
 
-1. Start the game with the mod + a `ClientId` set.
+1. Start the game with the mod installed (the built-in `ClientId` works as-is).
 2. The BepInEx console (and an on-screen toast) print:
    `TWITCH SETUP: open https://www.twitch.tv/activate and enter code XXXXXXXX`
 3. Open that URL **logged in as your broadcaster account**, enter the code, approve the
@@ -179,20 +175,17 @@ Now redeem a mapped reward or cheer bits and watch the effect fire.
 
 ## Wiring effects into the game
 
-Open [`src/Game/GameBridge.cs`](src/Game/GameBridge.cs) — it's the only file you need
-to touch. Each method (e.g. `DropDust`, `GiveMoney`, `ShakeWorld`) currently just logs.
-To make one real:
+Instant effects live in [`src/Game/GameBridge.cs`](src/Game/GameBridge.cs); effects that
+change something for a while live in [`src/Game/TimedEffects.cs`](src/Game/TimedEffects.cs)
+and [`src/Game/ViewEffects.cs`](src/Game/ViewEffects.cs). To add one:
 
 1. After the first BepInEx launch, decompile `BepInEx/interop/Assembly-CSharp.dll`
-   (dnSpyEx / ILSpy / dotPeek) and find the relevant manager (player controller,
-   economy, dust/dirt spawner, …).
-2. Uncomment the `Assembly-CSharp` reference in
-   [`src/MoonSweepersTwitch.csproj`](src/MoonSweepersTwitch.csproj).
-3. Either call the game's static singletons directly, or capture an instance with a
-   Harmony patch — [`src/Game/GamePatches.cs`](src/Game/GamePatches.cs) shows the
-   exact pattern (and how to apply Harmony from `Plugin.Load`).
-4. Fill in the method body. Add brand-new effects by registering them in
-   [`src/Game/Effects.cs`](src/Game/Effects.cs).
+   (dnSpyEx / ILSpy / dotPeek) and find the relevant game class (player controller,
+   economy, dust/dirt systems, …).
+2. Reach the live object with `GameBridge.FindFirst<T>()`, or capture an instance with a
+   Harmony patch: [`src/Game/GamePatches.cs`](src/Game/GamePatches.cs) shows the
+   pattern (and how to apply Harmony from `Plugin.Load`).
+3. Write the effect, and register its key in [`src/Game/Effects.cs`](src/Game/Effects.cs).
 
 Everything in `GameBridge` runs on the Unity **main thread**, so it's safe to touch
 Unity objects there.
@@ -205,9 +198,8 @@ Unity objects there.
 
 > **Multiplayer caveat.** Moon Sweepers is co-op (up to 16 players). Client-side edits
 > to **shared** state (money, spawned objects, world state) may not replicate to other
-> players, or may be corrected by the host. Start with **local/visual** effects — fog,
-> confetti, camera shake, your own movement speed — which are the safest. Shared-state
-> effects generally need to run on, or be requested from, the host.
+> players, or may be corrected by the host. Local effects (your own view, controls and
+> movement) are the safest; shared-state effects need to run on the host.
 
 ---
 

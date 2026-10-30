@@ -10,6 +10,10 @@ namespace MoonSweepersTwitch.Config
     /// </summary>
     public sealed class PluginConfig
     {
+        /// <summary>The mod's own public Twitch app, so most streamers needn't register one.</summary>
+        public const string DefaultClientId = "14cjcbeu8dxso3ac838q3fw0t4me8g";
+
+        public readonly ConfigEntry<bool> TwitchEnabled;
         public readonly ConfigEntry<string> ClientId;
         public readonly ConfigEntry<bool> EnableChannelPoints;
         public readonly ConfigEntry<bool> EnableBits;
@@ -27,12 +31,17 @@ namespace MoonSweepersTwitch.Config
 
         public PluginConfig(ConfigFile config)
         {
+            TwitchEnabled = config.Bind(
+                "Twitch", "Enabled", true,
+                "Connect to Twitch. Streamers leave this on. Crew members who only want to be hit by " +
+                "the streamer's effects set it to false: those reach them through the game lobby.");
+
             ClientId = config.Bind(
-                "Twitch", "ClientId", "",
-                "Your Twitch application Client ID. Create a FREE app at " +
-                "https://dev.twitch.tv/console/apps (OAuth Redirect URL can be " +
-                "http://localhost — Device Code Flow does not actually use it). " +
-                "The account you authorize must be the broadcaster/streamer.");
+                "Twitch", "ClientId", DefaultClientId,
+                "Twitch application Client ID. The default is the mod's shared public app, so most " +
+                "streamers can leave it as-is. To use your own, create a free app with Client Type " +
+                "'Public' at https://dev.twitch.tv/console/apps (OAuth Redirect URL http://localhost) " +
+                "and paste its Client ID here. The account you authorize must be the streamer's.");
 
             EnableChannelPoints = config.Bind(
                 "Twitch", "EnableChannelPoints", true,
@@ -45,8 +54,7 @@ namespace MoonSweepersTwitch.Config
                 "Listen for Bits/cheers (needs the bits:read scope — requested automatically).");
 
             RewardMappings = config.Bind(
-                "ChannelPoints", "RewardMappings",
-                "Make it Foggy=>fog || Dump Dust=>dropdust || Shake the Moon=>earthquake",
+                "ChannelPoints", "RewardMappings", "",
                 "Map Channel Point rewards to effects. Pairs are separated by '||' and " +
                 "each pair is 'RewardName=>effectKey'. Match is by reward title " +
                 "(case-insensitive). To match by reward id instead, use 'id:<reward-id>=>effectKey'. " +
@@ -54,9 +62,9 @@ namespace MoonSweepersTwitch.Config
                 "Available built-in effect keys: " + Effects.EffectKeyList + ".");
 
             BitMappings = config.Bind(
-                "Bits", "BitMappings",
-                "1=>confetti || 100=>fog || 1000=>earthquake",
-                "Map cheer amounts to effects. Pairs separated by '||', each 'threshold=>effectKey'. " +
+                "Bits", "BitMappings", "",
+                "Map cheer amounts to effects. Pairs separated by '||', each 'threshold=>effectKey' " +
+                "(e.g. 100=>tunnelvision || 500=>emptydust). Empty means cheers trigger nothing. " +
                 "When someone cheers N bits, the effect for the HIGHEST threshold <= N fires. " +
                 "Available built-in effect keys: " + Effects.EffectKeyList + ".");
 
@@ -69,22 +77,20 @@ namespace MoonSweepersTwitch.Config
                 "Verbose logging to the BepInEx console (raw EventSub messages, reward ids, etc.).");
 
             TestEffectKey = config.Bind(
-                "General", "TestEffectKey", KeyCode.F8,
-                "Press this key in-game to fire a test effect (verifies the mod works without Twitch). " +
-                "Set to None to disable.");
+                "General", "TestEffectKey", KeyCode.None,
+                "A key that fires TestEffectKeyEffect in-game, to try an effect without Twitch " +
+                "(e.g. F8). None disables it; leave it off while streaming.");
 
-            // Which effect the test key fires. Defaults to the first configured bit effect.
             TestEffectKeyName = config.Bind(
-                "General", "TestEffectKeyEffect", "confetti",
-                "Effect key the test hotkey fires.");
+                "General", "TestEffectKeyEffect", "",
+                "Effect key the test hotkey fires (e.g. tunnelvision).");
 
             TestEffectKey2 = config.Bind(
-                "General", "TestEffectKey2", KeyCode.F9,
-                "A second test hotkey, so two effects can be tried in one session. " +
-                "Set to None to disable.");
+                "General", "TestEffectKey2", KeyCode.None,
+                "A second test hotkey, so two effects can be tried in one session. None disables it.");
 
             TestEffectKey2Name = config.Bind(
-                "General", "TestEffectKey2Effect", "refilldust",
+                "General", "TestEffectKey2Effect", "",
                 "Effect key the second test hotkey fires.");
 
             TestHotkeys = config.Bind(

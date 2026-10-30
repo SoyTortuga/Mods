@@ -47,13 +47,17 @@ namespace MoonSweepersTwitch
             behaviour.Initialize(_config, _effects);
 
             // Start Twitch on a background thread; it hands game effects back to the
-            // main thread via MainThreadDispatcher. A missing Client ID is not fatal —
-            // the overlay and the F8 test hotkey still work for verifying the mod loads.
-            if (string.IsNullOrWhiteSpace(_config.ClientId.Value))
+            // main thread via MainThreadDispatcher. Twitch being off or unconfigured is not
+            // fatal: the mod still loads, and the test hotkeys still work.
+            if (!_config.TwitchEnabled.Value)
+            {
+                Log.LogInfo("Twitch is off ([Twitch] Enabled = false).");
+            }
+            else if (string.IsNullOrWhiteSpace(_config.ClientId.Value))
             {
                 Log.LogWarning(
                     "No Twitch Client ID configured. The mod is loaded and the test " +
-                    "hotkey works, but Twitch events are disabled. Set [Twitch] ClientId " +
+                    "hotkeys work, but Twitch events are disabled. Set [Twitch] ClientId " +
                     "in BepInEx\\config\\" + PluginInfo.Guid + ".cfg to connect.");
             }
             else
@@ -74,6 +78,13 @@ namespace MoonSweepersTwitch
             catch (OperationCanceledException)
             {
                 // Expected on shutdown.
+            }
+            catch (TimeoutException)
+            {
+                Log.LogWarning(
+                    "The Twitch sign-in code expired without being approved. Restart the game for a " +
+                    "new code. Not the streamer? Set [Twitch] Enabled = false in BepInEx\\config\\" +
+                    PluginInfo.Guid + ".cfg and this prompt stops.");
             }
             catch (Exception ex)
             {

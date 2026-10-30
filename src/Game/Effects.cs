@@ -15,8 +15,7 @@ namespace MoonSweepersTwitch.Game
         public const string EffectKeyList =
             "breakdown, toothbrush, emptydust, refilldust, joonasoff, roombaoff, bankrupt, " +
             "gravity2x, gravity4x, gravity8x, lightsout, tunnelvision, fisheye, potato, paycut, " +
-            "tinypockets, butterfingers, reversecontrols, australianmoon, moonstorm, endall, " +
-            "confetti, fog, dropdust, earthquake, speedboost, slowmo, payout";
+            "tinypockets, butterfingers, reversecontrols, australianmoon, moonstorm, endall";
 
         public static void RegisterBuiltIns(EffectRegistry registry, PluginConfig config)
         {
@@ -157,50 +156,6 @@ namespace MoonSweepersTwitch.Game
             {
                 Feedback(ctx, "✅ All effects ended.");
                 GameBridge.EndAllTimed(ctx);
-            }));
-
-            // --- Original template effects (still stubbed in GameBridge) ---
-
-            registry.Register(new Effect("confetti", "Confetti burst", ctx =>
-            {
-                Feedback(ctx, "🎉 Confetti!");
-                GameBridge.SpawnConfetti(ctx);
-            }));
-
-            registry.Register(new Effect("fog", "Dust fog", ctx =>
-            {
-                Feedback(ctx, "🌫 Fog rolls in");
-                GameBridge.SetFog(ctx, enabled: true, seconds: 20f);
-            }));
-
-            registry.Register(new Effect("dropdust", "Dump a pile of dust", ctx =>
-            {
-                Feedback(ctx, "🪣 A fresh pile of moon dust appears");
-                GameBridge.DropDust(ctx, amount: 50);
-            }));
-
-            registry.Register(new Effect("earthquake", "Moonquake", ctx =>
-            {
-                Feedback(ctx, "🌋 Moonquake!");
-                GameBridge.ShakeWorld(ctx, intensity: 1f, seconds: 6f);
-            }));
-
-            registry.Register(new Effect("speedboost", "Speed boost", ctx =>
-            {
-                Feedback(ctx, "⚡ Speed boost");
-                GameBridge.SetPlayerSpeedMultiplier(ctx, multiplier: 1.6f, seconds: 30f);
-            }));
-
-            registry.Register(new Effect("slowmo", "Slow motion", ctx =>
-            {
-                Feedback(ctx, "🐌 Slow motion");
-                GameBridge.SetPlayerSpeedMultiplier(ctx, multiplier: 0.5f, seconds: 20f);
-            }));
-
-            registry.Register(new Effect("payout", "Cash tip", ctx =>
-            {
-                Feedback(ctx, "💰 A tip from the crowd");
-                GameBridge.GiveMoney(ctx, amount: 100);
             }));
         }
     }

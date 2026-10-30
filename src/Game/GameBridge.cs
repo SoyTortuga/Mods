@@ -18,14 +18,10 @@ namespace MoonSweepersTwitch.Game
     /// <see cref="ModBehaviour"/>.Update), so it is safe to touch Unity/game objects.
     ///
     /// The game's own types live in the MoonCleaners namespace (decompiled from
-    /// BepInEx\interop\Assembly-CSharp.dll). The two implemented effects below are
-    /// host-local and drive the local player's own components, so they don't fight
-    /// the co-op host or require any network replication:
-    ///   - BreakVehicles:   ejects the local player from any vehicle for a while.
-    ///   - ToothbrushOnly:  forces the local player's toolbelt to the brush for a while.
-    ///
-    /// The remaining methods (confetti/fog/dust/shake/speed/money) are still stubs —
-    /// they only log until wired up, mirroring the original template.
+    /// BepInEx\interop\Assembly-CSharp.dll). Effects here either drive the local
+    /// player's own components (vehicle breakdown, toothbrush, dropping dust) or change
+    /// shared world state the host controls (robots, money, re-dusting sectors). Timed
+    /// effects that change a value for a while live in <see cref="TimedEffects"/>.
     /// ============================================================================
     /// </summary>
     public static class GameBridge
@@ -930,53 +926,6 @@ namespace MoonSweepersTwitch.Game
                 Plugin.Log.LogWarning($"[GameBridge] {label}<{typeof(T).Name}> unavailable: {ex.Message}");
                 return false;
             }
-        }
-
-        // =====================================================================
-        //  Still-stubbed effects (log only). Wire these up the same way as above.
-        // =====================================================================
-
-        private static void NotImplemented(string what, EffectContext ctx)
-        {
-            Plugin.Log.LogInfo(
-                $"[GameBridge] '{what}' fired ({ctx.Describe()}) — on-screen feedback only. " +
-                $"Wire this up in GameBridge.cs to affect the game.");
-        }
-
-        public static void SpawnConfetti(EffectContext ctx)
-        {
-            NotImplemented(nameof(SpawnConfetti), ctx);
-            // Note: MoonCleaners.MoonConfetti.Burst(Vector3 at, Vector3 up, int count) exists.
-        }
-
-        public static void SetFog(EffectContext ctx, bool enabled, float seconds)
-        {
-            NotImplemented(nameof(SetFog), ctx);
-            // Unity built-in fog is usually safe without game code:
-            //   RenderSettings.fog = enabled; RenderSettings.fogDensity = 0.04f;
-        }
-
-        public static void DropDust(EffectContext ctx, int amount)
-        {
-            NotImplemented(nameof(DropDust), ctx);
-        }
-
-        public static void ShakeWorld(EffectContext ctx, float intensity, float seconds)
-        {
-            NotImplemented(nameof(ShakeWorld), ctx);
-            // Note: the local player's camera is MoonCleaners.MoonWalker.viewCamera.
-        }
-
-        public static void SetPlayerSpeedMultiplier(EffectContext ctx, float multiplier, float seconds)
-        {
-            NotImplemented(nameof(SetPlayerSpeedMultiplier), ctx);
-            // Note: MoonWalker has DevSpeedMultiplier / EquipmentSpeedMultiplier.
-        }
-
-        public static void GiveMoney(EffectContext ctx, int amount)
-        {
-            NotImplemented(nameof(GiveMoney), ctx);
-            // Note: MoonWorld.DevAddMoney / CrewBuildMoney touch shared (team) state.
         }
     }
 }
