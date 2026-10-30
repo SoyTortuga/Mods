@@ -22,7 +22,7 @@ All are tested in-game except `joonasoff` and `roombaoff`, which still need a sa
 | Key | What it does |
 |---|---|
 | `breakdown` | Ejects the streamer from any vehicle and keeps them out of vehicles for 15 minutes. |
-| `toothbrush` | Swaps the toothbrush into the brush slot and locks the toolbelt to it for 5 minutes, then gives the original brush back. If the game closes mid-effect, the brush is restored on the next load. |
+| `toothbrush` | Swaps the toothbrush into the brush slot and locks the toolbelt to it for 15 minutes, then gives the original brush back. If the game closes mid-effect, the brush is restored on the next load. |
 | `emptydust` | Drops all held moon dust on the ground as 1 kg canisters (5 kg held = 5 canisters). |
 | `refilldust` | Re-dusts a random sector the streamer has fully cleared, live, keeping its hex shape. |
 | `joonasoff` | Switches off every J.O.O.N.A.S.; someone has to go and switch it back on. |

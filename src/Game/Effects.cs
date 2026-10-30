@@ -19,7 +19,7 @@ namespace MoonSweepersTwitch.Game
             "gravity2x, gravity4x, gravity8x, lightsout, tunnelvision, fisheye, potato, paycut, " +
             "tinypockets, butterfingers, reversecontrols, australianmoon, moonstorm, endall";
 
-        private const float Min5 = 300f, Min10 = 600f, Min15 = 900f, Min30 = 1800f;
+        private const float Min10 = 600f, Min15 = 900f, Min30 = 1800f;
 
         public static void RegisterBuiltIns(EffectRegistry registry, PluginConfig config)
         {
@@ -43,7 +43,7 @@ namespace MoonSweepersTwitch.Game
 
             Add("breakdown", "Vehicle breakdown", Player, Min15, "🚗💨 Vehicles broke down!",
                 (ctx, s) => GameBridge.BreakVehicles(ctx, s));
-            Add("toothbrush", "Toothbrush only", Player, Min5, "🪥 Toothbrush only!",
+            Add("toothbrush", "Toothbrush only", Player, Min15, "🪥 Toothbrush only!",
                 (ctx, s) => GameBridge.ToothbrushOnly(ctx, s));
             Add("emptydust", "Drop all dust", Player, 0f, "🫙 Your dust spills out!",
                 (ctx, s) => GameBridge.DropDustCanisters(ctx)); // 1 canister per kg held
