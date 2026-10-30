@@ -17,7 +17,7 @@ connection with auto-reconnect, channel-point and bits subscriptions, and routin
 events to named effects via your config.
 
 The **chat sabotage effects below are implemented** against the real game code. The first
-four (`breakdown` to `refilldust`) are tested in-game; the rest are new and still being tested:
+all are tested in-game except `joonasoff` and `roombaoff`, which still need a save that has robots:
 
 | Key | What it does |
 |---|---|
