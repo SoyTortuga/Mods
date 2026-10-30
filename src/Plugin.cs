@@ -37,6 +37,7 @@ namespace MoonSweepersTwitch
             _config = new PluginConfig(Config);
             _effects = new EffectRegistry();
             Effects.RegisterBuiltIns(_effects, _config);
+            CrewRelay.Init(_effects, () => _config.CrewRelayEnabled.Value);
 
             // Inject the MonoBehaviour that gives us Update()/OnGUI() on the main thread.
             ClassInjector.RegisterTypeInIl2Cpp<ModBehaviour>();

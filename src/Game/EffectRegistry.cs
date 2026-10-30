@@ -4,21 +4,38 @@ using MoonSweepersTwitch.Util;
 
 namespace MoonSweepersTwitch.Game
 {
+    /// <summary>Where an effect has to run for it to reach everyone it should.</summary>
+    public enum EffectScope
+    {
+        /// <summary>Changes the player's own game (view, controls, movement, tools); runs on every player with the mod.</summary>
+        Player,
+        /// <summary>Changes shared world state the host owns (money, robots); runs on the host only.</summary>
+        World,
+    }
+
     /// <summary>A named, runnable in-game effect.</summary>
     public sealed class Effect
     {
         public string Key { get; }
         public string DisplayName { get; }
-        private readonly Action<EffectContext> _run;
+        public EffectScope Scope { get; }
 
-        public Effect(string key, string displayName, Action<EffectContext> run)
+        /// <summary>Full duration in seconds; 0 for an instant effect.</summary>
+        public float Duration { get; }
+
+        private readonly Action<EffectContext, float> _run;
+
+        public Effect(string key, string displayName, EffectScope scope, float duration, Action<EffectContext, float> run)
         {
             Key = key;
             DisplayName = displayName;
+            Scope = scope;
+            Duration = duration;
             _run = run;
         }
 
-        public void Run(EffectContext ctx) => _run(ctx);
+        /// <summary>Run with the context's remaining time if it has one, else the full duration.</summary>
+        public void Run(EffectContext ctx) => _run(ctx, ctx.Seconds ?? Duration);
     }
 
     /// <summary>
@@ -34,11 +51,17 @@ namespace MoonSweepersTwitch.Game
 
         public bool Contains(string key) => _effects.ContainsKey(key);
 
+        public bool TryGet(string key, out Effect effect) => _effects.TryGetValue(key, out effect!);
+
         public IEnumerable<string> Keys => _effects.Keys;
 
         /// <summary>
         /// Queue the effect to run on the Unity main thread. No-op (with a log) if the
         /// key is unknown so a typo in config never crashes the stream.
+        ///
+        /// An effect triggered here (not relayed) is also published to the crew. A World
+        /// effect only runs on the host: triggered on another player's game, it is
+        /// published for the host to run instead of running locally.
         /// </summary>
         public void Trigger(string key, EffectContext ctx)
         {
@@ -55,14 +78,25 @@ namespace MoonSweepersTwitch.Game
             MainThreadDispatcher.Enqueue(() =>
             {
                 Plugin.Log.LogInfo($"Effect '{effect.Key}' <- {ctx.Describe()}");
-                try
+
+                bool runHere = effect.Scope == EffectScope.Player || CrewRelay.RunsWorldEffects;
+                if (runHere)
                 {
-                    effect.Run(ctx);
+                    try
+                    {
+                        effect.Run(ctx);
+                    }
+                    catch (Exception ex)
+                    {
+                        Plugin.Log.LogError($"Effect '{effect.Key}' threw: {ex}");
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    Plugin.Log.LogError($"Effect '{effect.Key}' threw: {ex}");
+                    Plugin.Log.LogInfo($"Effect '{effect.Key}' changes the shared world, so the host runs it.");
                 }
+
+                if (!ctx.FromCrew) CrewRelay.Publish(effect, ctx);
             });
         }
     }

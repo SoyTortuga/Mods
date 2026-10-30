@@ -1,13 +1,15 @@
 using MoonSweepersTwitch.Config;
 using MoonSweepersTwitch.Util;
+using static MoonSweepersTwitch.Game.EffectScope;
 
 namespace MoonSweepersTwitch.Game
 {
     /// <summary>
-    /// The built-in effect catalogue. Each effect shows feedback and then calls into
-    /// <see cref="GameBridge"/>, which is the single place that touches the actual
-    /// game. Add a new effect by registering it here and implementing the matching
-    /// <see cref="GameBridge"/> method.
+    /// The built-in effect catalogue. Each effect declares where it runs (each player, or
+    /// the host's shared world) and its full duration (0 for instant), then calls into
+    /// <see cref="GameBridge"/> or <see cref="TimedEffects"/>. A timed effect runs for the
+    /// seconds it is given: the full duration when triggered here, or the time the
+    /// original has left when relayed from another player (<see cref="CrewRelay"/>).
     /// </summary>
     public static class Effects
     {
@@ -17,6 +19,8 @@ namespace MoonSweepersTwitch.Game
             "gravity2x, gravity4x, gravity8x, lightsout, tunnelvision, fisheye, potato, paycut, " +
             "tinypockets, butterfingers, reversecontrols, australianmoon, moonstorm, endall";
 
+        private const float Min5 = 300f, Min10 = 600f, Min15 = 900f, Min30 = 1800f;
+
         public static void RegisterBuiltIns(EffectRegistry registry, PluginConfig config)
         {
             void Feedback(EffectContext ctx, string label)
@@ -25,138 +29,59 @@ namespace MoonSweepersTwitch.Game
                     OnScreenMessages.Show($"{label}\n({ctx.Describe()})", 5f);
             }
 
-            // --- Chat sabotage effects (host-local, implemented) ---
-
-            registry.Register(new Effect("breakdown", "Vehicle breakdown", ctx =>
+            void Add(string key, string name, EffectScope scope, float duration, string feedback,
+                System.Action<EffectContext, float> run)
             {
-                Feedback(ctx, "🚗💨 Vehicles broke down!");
-                GameBridge.BreakVehicles(ctx, seconds: 900f); // 15 minutes
-            }));
+                registry.Register(new Effect(key, name, scope, duration, (ctx, seconds) =>
+                {
+                    Feedback(ctx, feedback);
+                    run(ctx, seconds);
+                }));
+            }
 
-            registry.Register(new Effect("toothbrush", "Toothbrush only", ctx =>
-            {
-                Feedback(ctx, "🪥 Toothbrush only!");
-                GameBridge.ToothbrushOnly(ctx, seconds: 300f); // 5 minutes
-            }));
+            // --- The player's own vehicles, tools and dust ---
 
-            registry.Register(new Effect("emptydust", "Drop all dust", ctx =>
-            {
-                Feedback(ctx, "🫙 Your dust spills out!");
-                GameBridge.DropDustCanisters(ctx); // drops 1 canister per kg held
-            }));
+            Add("breakdown", "Vehicle breakdown", Player, Min15, "🚗💨 Vehicles broke down!",
+                (ctx, s) => GameBridge.BreakVehicles(ctx, s));
+            Add("toothbrush", "Toothbrush only", Player, Min5, "🪥 Toothbrush only!",
+                (ctx, s) => GameBridge.ToothbrushOnly(ctx, s));
+            Add("emptydust", "Drop all dust", Player, 0f, "🫙 Your dust spills out!",
+                (ctx, s) => GameBridge.DropDustCanisters(ctx)); // 1 canister per kg held
 
-            registry.Register(new Effect("refilldust", "Re-dust a sector", ctx =>
-            {
-                Feedback(ctx, "🌑 A sector gets dusty again!");
-                GameBridge.RefillRandomSector(ctx);
-            }));
+            // Every player re-dusts the same sector: the first game picks it and shares it.
+            Add("refilldust", "Re-dust a sector", Player, 0f, "🌑 A sector gets dusty again!",
+                (ctx, s) => GameBridge.RefillRandomSector(ctx));
 
-            // --- Robots and money (instant; shared world state) ---
+            // --- Shared world state the host owns ---
 
-            registry.Register(new Effect("joonasoff", "J.O.O.N.A.S. breakdown", ctx =>
-            {
-                Feedback(ctx, "🤖 J.O.O.N.A.S. switched off!");
-                GameBridge.RobotsOff(ctx, "J.O.O.N.A.S. breakdown", MoonCleaners.MoonWorld.MapRobotKind.Joonas);
-            }));
+            Add("joonasoff", "J.O.O.N.A.S. breakdown", World, 0f, "🤖 J.O.O.N.A.S. switched off!",
+                (ctx, s) => GameBridge.RobotsOff(ctx, "J.O.O.N.A.S. breakdown", MoonCleaners.MoonWorld.MapRobotKind.Joonas));
+            Add("roombaoff", "Roomba breakdown", World, 0f, "🧹 The robot vacuums went home!",
+                (ctx, s) => GameBridge.RobotsOff(ctx, "Roomba breakdown",
+                    MoonCleaners.MoonWorld.MapRobotKind.MkI, MoonCleaners.MoonWorld.MapRobotKind.MkII));
+            Add("bankrupt", "Bankrupt", World, 0f, "💸 Bankrupt!",
+                (ctx, s) => GameBridge.Bankrupt(ctx));
 
-            registry.Register(new Effect("roombaoff", "Roomba breakdown", ctx =>
-            {
-                Feedback(ctx, "🧹 The robot vacuums went home!");
-                GameBridge.RobotsOff(ctx, "Roomba breakdown",
-                    MoonCleaners.MoonWorld.MapRobotKind.MkI, MoonCleaners.MoonWorld.MapRobotKind.MkII);
-            }));
+            // --- Timed effects on each player's own game ---
 
-            registry.Register(new Effect("bankrupt", "Bankrupt", ctx =>
-            {
-                Feedback(ctx, "💸 Bankrupt!");
-                GameBridge.Bankrupt(ctx);
-            }));
+            Add("gravity2x", "2x gravity", Player, Min15, "🪐 2x gravity!", (ctx, s) => TimedEffects.Gravity.StartLevel(2, s));
+            Add("gravity4x", "4x gravity", Player, Min15, "🪐 4x gravity!", (ctx, s) => TimedEffects.Gravity.StartLevel(4, s));
+            Add("gravity8x", "8x gravity", Player, Min15, "🪐 8x gravity!", (ctx, s) => TimedEffects.Gravity.StartLevel(8, s));
+            Add("lightsout", "Lights out", Player, Min15, "🔦 Lights out!", (ctx, s) => TimedEffects.LightsOut.Start(s));
+            Add("tunnelvision", "Tunnel vision", Player, Min15, "🔭 Tunnel vision!",
+                (ctx, s) => TimedEffects.Fov.StartMode("Tunnel vision", fov: 30f, seconds: s));
+            Add("fisheye", "Fisheye", Player, Min15, "🐟 Fisheye!",
+                (ctx, s) => TimedEffects.Fov.StartMode("Fisheye", fov: 140f, seconds: s));
+            Add("potato", "Potato mode", Player, Min15, "🥔 Potato mode!", (ctx, s) => TimedEffects.Potato.Start(s));
+            Add("paycut", "Paycut", Player, Min30, "📉 Paycut: half pay!", (ctx, s) => TimedEffects.Paycut.Start(s));
+            Add("tinypockets", "Tiny pockets", Player, Min15, "👖 Tiny pockets!", (ctx, s) => TimedEffects.TinyPockets.Start(s));
+            Add("butterfingers", "Butterfingers", Player, Min10, "🧈 Butterfingers!", (ctx, s) => TimedEffects.Butterfingers.Start(s));
+            Add("reversecontrols", "Reverse controls", Player, Min10, "🔄 Controls reversed!", (ctx, s) => TimedEffects.Reverse.Start(s));
+            Add("australianmoon", "Australian moon", Player, Min10, "🙃 Australian moon!", (ctx, s) => TimedEffects.UpsideDown.Start(s));
+            Add("moonstorm", "Moon storm", Player, Min10, "🌪 Moon storm!", (ctx, s) => TimedEffects.Storm.Start(s));
 
-            // --- Timed effects (host-local: they change the streamer's own game) ---
-
-            registry.Register(new Effect("gravity2x", "2x gravity", ctx =>
-            {
-                Feedback(ctx, "🪐 2x gravity!");
-                TimedEffects.Gravity.StartLevel(2, seconds: 900f); // 15 minutes
-            }));
-
-            registry.Register(new Effect("gravity4x", "4x gravity", ctx =>
-            {
-                Feedback(ctx, "🪐 4x gravity!");
-                TimedEffects.Gravity.StartLevel(4, seconds: 900f);
-            }));
-
-            registry.Register(new Effect("gravity8x", "8x gravity", ctx =>
-            {
-                Feedback(ctx, "🪐 8x gravity!");
-                TimedEffects.Gravity.StartLevel(8, seconds: 900f);
-            }));
-
-            registry.Register(new Effect("lightsout", "Lights out", ctx =>
-            {
-                Feedback(ctx, "🔦 Lights out!");
-                TimedEffects.LightsOut.Start(seconds: 900f); // 15 minutes
-            }));
-
-            registry.Register(new Effect("tunnelvision", "Tunnel vision", ctx =>
-            {
-                Feedback(ctx, "🔭 Tunnel vision!");
-                TimedEffects.Fov.StartMode("Tunnel vision", fov: 30f, seconds: 900f);
-            }));
-
-            registry.Register(new Effect("fisheye", "Fisheye", ctx =>
-            {
-                Feedback(ctx, "🐟 Fisheye!");
-                TimedEffects.Fov.StartMode("Fisheye", fov: 140f, seconds: 900f);
-            }));
-
-            registry.Register(new Effect("potato", "Potato mode", ctx =>
-            {
-                Feedback(ctx, "🥔 Potato mode!");
-                TimedEffects.Potato.Start(seconds: 900f); // 15 minutes
-            }));
-
-            registry.Register(new Effect("paycut", "Paycut", ctx =>
-            {
-                Feedback(ctx, "📉 Paycut: half pay!");
-                TimedEffects.Paycut.Start(seconds: 1800f); // 30 minutes
-            }));
-
-            registry.Register(new Effect("tinypockets", "Tiny pockets", ctx =>
-            {
-                Feedback(ctx, "👖 Tiny pockets!");
-                TimedEffects.TinyPockets.Start(seconds: 900f); // 15 minutes
-            }));
-
-            registry.Register(new Effect("butterfingers", "Butterfingers", ctx =>
-            {
-                Feedback(ctx, "🧈 Butterfingers!");
-                TimedEffects.Butterfingers.Start(seconds: 600f); // 10 minutes
-            }));
-
-            registry.Register(new Effect("reversecontrols", "Reverse controls", ctx =>
-            {
-                Feedback(ctx, "🔄 Controls reversed!");
-                TimedEffects.Reverse.Start(seconds: 600f); // 10 minutes
-            }));
-
-            registry.Register(new Effect("australianmoon", "Australian moon", ctx =>
-            {
-                Feedback(ctx, "🙃 Australian moon!");
-                TimedEffects.UpsideDown.Start(seconds: 600f); // 10 minutes
-            }));
-
-            registry.Register(new Effect("moonstorm", "Moon storm", ctx =>
-            {
-                Feedback(ctx, "🌪 Moon storm!");
-                TimedEffects.Storm.Start(seconds: 600f); // 10 minutes
-            }));
-
-            registry.Register(new Effect("endall", "End all timed effects", ctx =>
-            {
-                Feedback(ctx, "✅ All effects ended.");
-                GameBridge.EndAllTimed(ctx);
-            }));
+            Add("endall", "End all timed effects", Player, 0f, "✅ All effects ended.",
+                (ctx, s) => GameBridge.EndAllTimed(ctx));
         }
     }
 }

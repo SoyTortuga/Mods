@@ -28,6 +28,7 @@ namespace MoonSweepersTwitch.Config
         public readonly ConfigEntry<KeyCode> TestEffectKey2;
         public readonly ConfigEntry<string> TestEffectKey2Name;
         public readonly ConfigEntry<string> TestHotkeys;
+        public readonly ConfigEntry<bool> CrewRelayEnabled;
 
         public PluginConfig(ConfigFile config)
         {
@@ -98,6 +99,11 @@ namespace MoonSweepersTwitch.Config
                 "More test hotkeys, for trying many effects in one session. Pairs separated by '||', " +
                 "each 'Key=effectKey', using Unity KeyCode names (e.g. F1=joonasoff || F2=bankrupt || Insert=endall). " +
                 "Leave empty to disable. Available effect keys: " + Effects.EffectKeyList + ".");
+
+            CrewRelayEnabled = config.Bind(
+                "Crew", "Enabled", true,
+                "Share triggered effects with everyone in your lobby who also runs this mod, and " +
+                "receive theirs. Players without the mod are never affected.");
         }
     }
 }

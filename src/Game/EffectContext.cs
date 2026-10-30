@@ -5,6 +5,8 @@ namespace MoonSweepersTwitch.Game
         ChannelPoints,
         Bits,
         Test,
+        /// <summary>Relayed from another player's game through the lobby (see <see cref="CrewRelay"/>).</summary>
+        Crew,
     }
 
     /// <summary>
@@ -26,6 +28,22 @@ namespace MoonSweepersTwitch.Game
         /// <summary>Free text the viewer attached: reward user input or cheer message.</summary>
         public string Message { get; init; } = "";
 
+        /// <summary>
+        /// Run a timed effect for this many seconds instead of its full duration. Set for
+        /// relayed effects, which start with only the time the original has left.
+        /// </summary>
+        public float? Seconds { get; init; }
+
+        /// <summary>
+        /// An effect-specific detail shared with the crew, e.g. which sector refilldust
+        /// picked so every player re-dusts the same one. An effect that picks such a
+        /// detail sets it here so the relay can pass it on.
+        /// </summary>
+        public string? Arg { get; set; }
+
+        /// <summary>True when this run was relayed from another player's game.</summary>
+        public bool FromCrew => Source == EffectSource.Crew;
+
         public static EffectContext Test(string effectKey) => new EffectContext
         {
             Source = EffectSource.Test,
@@ -40,6 +58,7 @@ namespace MoonSweepersTwitch.Game
         {
             EffectSource.ChannelPoints => $"{UserName} redeemed \"{RewardTitle}\"",
             EffectSource.Bits => $"{UserName} cheered {Amount} bits",
+            EffectSource.Crew => $"relayed from {UserName}",
             _ => "Test trigger",
         };
     }

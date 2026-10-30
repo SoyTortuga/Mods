@@ -85,6 +85,11 @@
       <HintPath>$(GameInteropDir)\UnityEngine.TextRenderingModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- Steamworks.NET: the crew relay shares effects through Steam lobby member data. -->
+    <Reference Include="com.rlabrecque.steamworks.net">
+      <HintPath>$(GameInteropDir)\com.rlabrecque.steamworks.net.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <!-- URP: Potato Mode lowers the render pipeline asset's renderScale. -->
     <Reference Include="Unity.RenderPipelines.Universal.Runtime">
       <HintPath>$(GameInteropDir)\Unity.RenderPipelines.Universal.Runtime.dll</HintPath>

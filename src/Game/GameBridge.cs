@@ -499,16 +499,33 @@ namespace MoonSweepersTwitch.Game
                 return;
             }
 
-            var cleared = new List<int>();
-            for (int i = 0; i < d.Count; i++)
-                if (d.States[i] == 1) cleared.Add(i);
-            if (cleared.Count == 0)
+            int id;
+            int clearedCount;
+            if (int.TryParse(ctx.Arg, out int shared))
             {
-                Plugin.Log.LogInfo($"[GameBridge] Refill: no cleared sectors to re-dust. ({ctx.Describe()})");
-                return;
+                // Relayed: re-dust the sector the original game picked, so everyone matches.
+                id = shared;
+                clearedCount = -1;
+                if (id < 0 || id >= d.Count || d.States[id] != 1)
+                {
+                    Plugin.Log.LogInfo($"[GameBridge] Refill: sector {id} is already dusty here. ({ctx.Describe()})");
+                    return;
+                }
             }
-
-            int id = cleared[_rng.Next(cleared.Count)];
+            else
+            {
+                var cleared = new List<int>();
+                for (int i = 0; i < d.Count; i++)
+                    if (d.States[i] == 1) cleared.Add(i);
+                if (cleared.Count == 0)
+                {
+                    Plugin.Log.LogInfo($"[GameBridge] Refill: no cleared sectors to re-dust. ({ctx.Describe()})");
+                    return;
+                }
+                id = cleared[_rng.Next(cleared.Count)];
+                clearedCount = cleared.Count;
+                ctx.Arg = id.ToString(); // shared with the crew
+            }
             string where = "";
             var walker = inv?.walker;
             if (walker != null)
@@ -525,7 +542,7 @@ namespace MoonSweepersTwitch.Game
                 bool redrawn = Step("Refill: RestoreRenderingBindings", () => world.RestoreRenderingBindings());
                 Plugin.Log.LogInfo(
                     $"[GameBridge] Refill: re-dusted cleared sector {id}{where} " +
-                    $"({cleared.Count} were cleared, redraw {(redrawn ? "ok" : "failed")}). ({ctx.Describe()})");
+                    $"({(clearedCount >= 0 ? clearedCount + " were cleared, " : "")}redraw {(redrawn ? "ok" : "failed")}). ({ctx.Describe()})");
             }
         }
 
@@ -644,6 +661,7 @@ namespace MoonSweepersTwitch.Game
         public static void Tick()
         {
             TimedEffects.Tick();
+            CrewRelay.Tick();
 
             try
             {
