@@ -110,7 +110,6 @@ namespace MoonSweepersTwitch.Twitch
             var body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
             ThrowIfUnauthorized(resp, body);
             var list = new System.Collections.Generic.List<CustomPowerUp>();
-            if (resp.StatusCode == HttpStatusCode.NotFound) return list; // no Power-ups on the channel
             if (!resp.IsSuccessStatusCode)
                 throw new InvalidOperationException($"helix/bits/custom_power_ups failed ({(int)resp.StatusCode}): {body}");
 

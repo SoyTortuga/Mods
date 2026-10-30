@@ -104,6 +104,8 @@ namespace MoonSweepersTwitch.Twitch
                 return;
             }
 
+            Plugin.Log.LogInfo($"Power-up check: Twitch lists {live.Count} custom Power-up(s) on this channel.");
+
             var used = new HashSet<string>(StringComparer.Ordinal);
             int matched = 0, missing = 0;
 
