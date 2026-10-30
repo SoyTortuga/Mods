@@ -111,7 +111,8 @@
   </Target>
 
   <!-- Deploy the built plugin straight into the game. -->
-  <Target Name="DeployToGame" AfterTargets="Build" Condition="'$(GameDir)' != '' and Exists('$(GameDir)')">
+  <!-- Pass -p:SkipDeploy=true to build without copying into the game (used by tools\package.ps1). -->
+  <Target Name="DeployToGame" AfterTargets="Build" Condition="'$(GameDir)' != '' and Exists('$(GameDir)') and '$(SkipDeploy)' != 'true'">
     <MakeDir Directories="$(GameDir)\BepInEx\plugins\$(AssemblyName)" />
     <Copy SourceFiles="$(TargetPath)"
           DestinationFolder="$(GameDir)\BepInEx\plugins\$(AssemblyName)" />
